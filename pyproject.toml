@@ -1,6 +1,6 @@
 [project]
 name = "dialog-engine"
-version = "0.0.0"
+version = "0.1.0"
 description = "Universal multi-step dialog engine for building form-driven flows and Telegram bots."
 authors = [{ name = "k0te1ch", email = "khvostov40@gmail.com" }]
 license = "MIT"
