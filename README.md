@@ -4,42 +4,44 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-`DialogEngine` — лёгкий движок многошаговых диалогов на чистом Python (stdlib, без
-обязательных зависимостей). Помогает строить сложные form-driven сценарии и
-Telegram-ботов без спагетти из хендлеров: схема диалога описывается данными, а
-движок управляет навигацией, валидацией и состоянием сессии.
+`DialogEngine` is a lightweight multi-step dialog engine written in pure Python
+(stdlib only, no required dependencies). It helps you build complex form-driven
+flows and Telegram bots without handler spaghetti: the dialog is described as
+data, and the engine drives navigation, validation, and session state.
 
-## Возможности
+## Features
 
-- Описание диалога данными (`dict` / JSON / список шагов) — без хардкода переходов.
-- Условные переходы между шагами (`next` по значению ответа).
-- Встроенная валидация ответов + кастомные валидаторы, синхронные и асинхронные.
-- Резолверы текста с подстановкой из накопленных ответов (`{name}` и т.п.).
-- Управление сессией: статусы `IN_PROGRESS / COMPLETED / CANCELLED`.
-- Опциональные extras: `pydantic`-валидация, загрузка схем из YAML, интеграция с `aiogram`.
+- Describe the dialog as data (`dict` / JSON / a list of steps) — no hard-coded transitions.
+- Conditional transitions between steps (`next` based on the answer value).
+- Built-in answer validation plus custom validators, both sync and async.
+- Text resolvers with substitution from collected answers (`{name}`, etc.).
+- Session management with `IN_PROGRESS / COMPLETED / CANCELLED` statuses.
+- Optional extras: `pydantic` validation, loading schemas from YAML, `aiogram` integration.
 
-## Установка
+## Installation
+
+The package is not published to PyPI; install it from source:
 
 ```bash
-pip install dialog-engine
-# с дополнительными возможностями:
-pip install "dialog-engine[validation,yaml,aiogram]"
+pip install git+https://github.com/k0te1ch/DialogEngine.git
+# with optional features:
+pip install "dialog-engine[validation,yaml,aiogram] @ git+https://github.com/k0te1ch/DialogEngine.git"
 ```
 
-Для разработки используется [Poetry](https://python-poetry.org/):
+For development, the project uses [Poetry](https://python-poetry.org/):
 
 ```bash
 poetry install --all-extras
 ```
 
-## Быстрый старт
+## Quick start
 
 ```python
 from dialog_engine import DialogEngine
 
 engine = DialogEngine.from_list([
-    {"id": "name", "type": "text", "text": "Как вас зовут?"},
-    {"id": "age", "type": "number", "text": "Сколько вам лет?", "min": 1},
+    {"id": "name", "type": "text", "text": "What is your name?"},
+    {"id": "age", "type": "number", "text": "How old are you?", "min": 1},
 ])
 
 session = engine.create_session()
@@ -49,26 +51,26 @@ while (step := engine.current_step(session)) is not None:
     try:
         engine.submit(session, answer)
     except ValueError as exc:
-        print("Ошибка:", exc)
+        print("Error:", exc)
 
-print("Готово!", session.answers)
+print("Done!", session.answers)
 ```
 
-## Асинхронный режим
+## Async mode
 
-Движок поддерживает асинхронные валидаторы и резолверы текста через
-`async_submit` / `async_resolve_text`. Полный пример —
+The engine supports async validators and text resolvers via `async_submit` /
+`async_resolve_text`. See the full example in
 [examples/async_validators_example.py](examples/async_validators_example.py).
 
-## Основной API
+## Core API
 
-- `DialogEngine` — загрузка схемы и управление потоком диалога.
-- `DialogSession` / `SessionStatus` — состояние одного запуска диалога.
-- `DialogStep` / `StepType` — описание шага и его тип.
-- `validate` — встроенная валидация ответов.
-- `DialogError`, `ValidationError`, `StepNotFoundError` — иерархия исключений.
+- `DialogEngine` — loads a schema and drives the dialog flow.
+- `DialogSession` / `SessionStatus` — state of a single dialog run.
+- `DialogStep` / `StepType` — a step description and its type.
+- `validate` — built-in answer validation.
+- `DialogError`, `ValidationError`, `StepNotFoundError` — exception hierarchy.
 
-## Разработка
+## Development
 
 ```bash
 poetry install --all-extras
@@ -77,19 +79,20 @@ poetry run pytest
 poetry run pre-commit run --all-files
 ```
 
-Коммиты — по [Conventional Commits](https://www.conventionalcommits.org/);
-формат проверяет хук `commitizen`. Релизы, теги и `CHANGELOG.md` полностью
-автоматизированы через [release-please](https://github.com/googleapis/release-please).
-Полный гайд с диаграммами — [docs/WORKFLOW.md](docs/WORKFLOW.md).
+Commits follow [Conventional Commits](https://www.conventionalcommits.org/);
+the format is enforced by the `commitizen` hook. Releases, tags, and
+`CHANGELOG.md` are fully automated via
+[release-please](https://github.com/googleapis/release-please). See the full
+guide with diagrams in [docs/WORKFLOW.md](docs/WORKFLOW.md).
 
-## Структура проекта
+## Project layout
 
-- `dialog_engine/` — исходный код библиотеки.
-- `tests/` — набор тестов (`pytest`).
-- `examples/` — примеры использования.
-- `docs/WORKFLOW.md` — гайд по веткам, коммитам и релизам.
-- `.github/workflows/` — CI и release-please.
+- `dialog_engine/` — the library source code.
+- `tests/` — the test suite (`pytest`).
+- `examples/` — usage examples.
+- `docs/WORKFLOW.md` — guide to branches, commits, and releases.
+- `.github/workflows/` — CI and release-please.
 
-## Лицензия
+## License
 
 [MIT](LICENSE)
