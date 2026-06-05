@@ -83,7 +83,7 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org/);
 the format is enforced by the `commitizen` hook. Releases, tags, and
 `CHANGELOG.md` are fully automated via
 [release-please](https://github.com/googleapis/release-please). See the full
-guide with diagrams in [docs/WORKFLOW.md](docs/WORKFLOW.md).
+guide with diagrams: [English](docs/WORKFLOW.en.md) · [Русский](docs/WORKFLOW.md).
 
 ## Project layout
 
