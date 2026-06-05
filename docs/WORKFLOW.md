@@ -1,5 +1,7 @@
 # Workflow: как это всё работает
 
+> 🌐 **Языки:** Русский (текущий) · [English](WORKFLOW.en.md)
+
 Документ описывает полный цикл — от первого `git commit` до GitHub Release — и
 как организовать работу через feature-ветки.
 
@@ -21,7 +23,7 @@ flowchart TD
     E --> F[git push в feature-ветку]
     F --> G[Pull Request на GitHub]
     G --> H[CI: python-app.yml<br/>pre-commit + pytest]
-    H -- зелёный --> I[Merge в main]
+    H -- зелёный --> I[Squash-merge в main<br/>заголовок PR = коммит]
     I --> J[CI: release-please.yml]
     J --> K[release-please открывает/<br/>обновляет Release PR]
     K -- merge Release PR --> L[Tag vX.Y.Z + GitHub Release<br/>+ CHANGELOG.md]
@@ -49,18 +51,23 @@ flowchart TD
 `type` обязателен, остальное опционально. `!` после типа/скоупа означает
 breaking change.
 
-| Type       | Когда использовать                              | Попадает в CHANGELOG как |
-|------------|--------------------------------------------------|--------------------------|
-| `feat`     | Новая функциональность                          | **Features**             |
-| `fix`      | Исправление бага                                 | **Bug Fixes**            |
-| `perf`     | Улучшение производительности                     | **Performance**          |
-| `refactor` | Рефакторинг без изменения поведения              | (скрыто по умолчанию)    |
-| `docs`     | Только документация                              | **Documentation**        |
-| `test`     | Добавление/правка тестов                         | (скрыто по умолчанию)    |
-| `build`    | Сборка, зависимости (pyproject.toml, poetry.lock)| **Build System**         |
-| `ci`       | GitHub Actions, pre-commit                       | (скрыто по умолчанию)    |
-| `chore`    | Рутина, без влияния на код                       | (скрыто по умолчанию)    |
-| `revert`   | Откат прошлого коммита                            | **Reverts**              |
+| Type       | Когда использовать                              | В CHANGELOG / релиз            |
+|------------|--------------------------------------------------|-------------------------------|
+| `feat`     | Новая функциональность                          | **Features** · minor          |
+| `fix`      | Исправление бага                                 | **Bug Fixes** · patch         |
+| `perf`     | Улучшение производительности                     | **Performance** · patch       |
+| `revert`   | Откат прошлого коммита                            | **Reverts** · patch           |
+| `docs`     | Только документация                              | скрыто, без релиза            |
+| `refactor` | Рефакторинг без изменения поведения              | скрыто, без релиза            |
+| `test`     | Добавление/правка тестов                         | скрыто, без релиза            |
+| `build`    | Сборка, зависимости (pyproject.toml, poetry.lock)| скрыто, без релиза            |
+| `ci`       | GitHub Actions, pre-commit                       | скрыто, без релиза            |
+| `style`    | Форматирование, без изменения логики             | скрыто, без релиза            |
+| `chore`    | Рутина, без влияния на код                       | скрыто, без релиза            |
+
+> Какие типы попадают в CHANGELOG и триггерят релиз, задаётся `changelog-sections`
+> в [release-please-config.json](../release-please-config.json). Сейчас релиз
+> выпускается только на `feat` / `fix` / `perf` / `revert`; остальное скрыто.
 
 **Примеры:**
 
@@ -144,21 +151,24 @@ gitGraph
     commit id: "feat: routing"
     commit id: "test: cover routing"
     checkout main
-    merge feat/conditional-steps tag: "PR #12"
+    merge feat/conditional-steps tag: "squash PR #12"
     commit id: "chore(main): release 0.2.0" tag: "v0.2.0"
 ```
 
 - Одна долгоживущая ветка: `main`, всегда зелёная и релизуемая.
 - Любая работа — короткая feature-ветка `feat/...`, `fix/...`, `chore/...`.
-- Merge через PR с зелёным CI.
+- **Squash-merge** через PR с зелёным CI: атомарные коммиты остаются в PR, а на
+  `main` ложится один коммит с заголовком PR — поэтому история линейная, а
+  changelog чистый (одна запись на PR).
 - Релиз делает release-please через отдельный Release PR (см. §6).
 
 ### Несколько правил
 
 1. **Маленькие PR.** Лучше три PR по 200 строк, чем один на 600.
 2. **Одна тема на ветку.** Не смешивай рефакторинг с фичей.
-3. **Имена веток:** `feat/<кратко>`, `fix/<кратко>`, `chore/<кратко>`.
-4. **Защити main.** Settings → Branches: require PR, require CI green.
+3. **Заголовок PR — валидный Conventional Commit.** При squash он становится
+   коммитом на `main` и попадает в changelog.
+4. **Имена веток:** `feat/<кратко>`, `fix/<кратко>`, `chore/<кратко>`.
 5. **Никогда не push --force в main.** В свою feature-ветку — можно после
    rebase, через `--force-with-lease`.
 
@@ -174,17 +184,17 @@ git pull --ff-only
 # 2. Новая ветка
 git switch -c feat/conditional-steps
 
-# 3. Работа + атомарные коммиты
+# 3. Работа + атомарные коммиты (живут в PR)
 git add dialog_engine/
 git commit -m "feat(engine): add conditional step routing"
 git commit -m "test(engine): cover conditional routing"
 
-# 4. Пуш и PR
+# 4. Пуш и PR (заголовок PR = будущий squash-коммит)
 git push -u origin feat/conditional-steps
 gh pr create --title "feat(engine): conditional step routing" --body "Closes #42"
 
-# 5. После зелёного CI — merge, удалить ветку
-gh pr merge --merge --delete-branch
+# 5. После зелёного CI — squash-merge, удалить ветку
+gh pr merge --squash --delete-branch
 
 # 6. Уборка
 git switch main && git pull --ff-only
@@ -192,7 +202,7 @@ git switch main && git pull --ff-only
 
 ### Rebase или merge?
 
-Правило: **rebase для своих веток, merge для общих**. После rebase —
+Правило: **rebase для своих веток, squash для вливания в `main`**. После rebase —
 `git push --force-with-lease` (безопаснее `--force`).
 
 ---
@@ -247,7 +257,7 @@ requests*.
 | [pyproject.toml](../pyproject.toml) (`[tool.commitizen]`) | Конфиг валидации формата коммитов |
 | [.github/workflows/python-app.yml](../.github/workflows/python-app.yml) | CI на каждый PR: pre-commit + pytest |
 | [.github/workflows/release-please.yml](../.github/workflows/release-please.yml) | Релизы: Release PR → тег + GitHub Release |
-| [release-please-config.json](../release-please-config.json) | Тип релиза, файлы с версией, правила bump |
+| [release-please-config.json](../release-please-config.json) | Тип релиза, файлы с версией, правила bump и `changelog-sections` |
 | [.release-please-manifest.json](../.release-please-manifest.json) | Текущая выпущенная версия (состояние release-please) |
 | [CHANGELOG.md](../CHANGELOG.md) | Авто-генерируется release-please. Руками **не редактировать**. |
 
@@ -256,7 +266,7 @@ requests*.
 ## TL;DR
 
 1. Commit-сообщения — по Conventional Commits, иначе коммит не пройдёт.
-2. Каждая задача — короткая ветка `feat/...`, через PR в `main`.
+2. Каждая задача — короткая ветка `feat/...`, через **squash-PR** в `main`.
 3. На `main` всегда зелёный CI и всегда релизуемо.
 4. Релиз = смержить Release PR, который ведёт release-please. Версии, теги и
    CHANGELOG генерируются из истории коммитов — руками их никто не пишет.
