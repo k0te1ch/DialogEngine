@@ -62,6 +62,45 @@ The engine supports async validators and text resolvers via `async_submit` /
 `async_resolve_text`. See the full example in
 [examples/async_validators_example.py](examples/async_validators_example.py).
 
+## aiogram 3 integration
+
+Optional layer that turns a dialog schema into a Telegram wizard. Install with
+the `aiogram` extra; the core package never imports aiogram.
+
+```python
+from aiogram import Dispatcher
+from dialog_engine import DialogEngine
+from dialog_engine.integrations.aiogram import (
+    DefaultSender, DialogRunner, KeyboardLayout, build_dialog_router,
+)
+
+engine = DialogEngine.from_file("dialogs/homework.json")
+runner = DialogRunner(engine, layout=KeyboardLayout(row_width=2, page_size=6))
+
+dispatcher = Dispatcher()
+dispatcher.include_router(
+    build_dialog_router(runner, sender_factory=DefaultSender, on_complete=save)
+)
+```
+
+What it gives you:
+
+- `render_keyboard` — `step.choices` as an inline keyboard, with paging
+  (`‹ 2/3 ›`) once the options no longer fit one screen. Paging state is UI
+  state and never lands in `session.answers`.
+- Short `callback_data` — a step token plus an option index, so long step IDs
+  and long choice keys still fit Telegram's 64-byte limit.
+- `DialogRunner` — button and text input, validation errors shown in place
+  without resetting the step, `back` / `skip` / `cancel`.
+- `FSMDialogStorage` — the session lives in aiogram's `FSMContext`, so a
+  wizard survives a process restart.
+- `DialogSender` — a protocol, not a hardcoded `bot.send_message`. The default
+  implementation sends and edits plain messages; replace it to answer with
+  `sendRichMessage`, ephemeral messages, or anything else. Editing goes through
+  the same protocol, because ephemeral messages have their own edit method.
+
+Full example: [examples/aiogram_homework_wizard.py](examples/aiogram_homework_wizard.py).
+
 ## Core API
 
 - `DialogEngine` — loads a schema and drives the dialog flow.
@@ -88,6 +127,7 @@ guide with diagrams: [English](docs/WORKFLOW.en.md) · [Русский](docs/WOR
 ## Project layout
 
 - `dialog_engine/` — the library source code.
+- `dialog_engine/integrations/aiogram/` — the optional aiogram 3 layer.
 - `tests/` — the test suite (`pytest`).
 - `examples/` — usage examples.
 - `docs/WORKFLOW.md` — guide to branches, commits, and releases.
