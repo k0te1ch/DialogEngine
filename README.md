@@ -96,8 +96,54 @@ What it gives you:
   wizard survives a process restart.
 - `DialogSender` — a protocol, not a hardcoded `bot.send_message`. The default
   implementation sends and edits plain messages; replace it to answer with
-  `sendRichMessage`, ephemeral messages, or anything else. Editing goes through
-  the same protocol, because ephemeral messages have their own edit method.
+  `sendRichMessage` or anything else. Editing goes through the same protocol.
+- `EphemeralSender` — shows the wizard in a group as an ephemeral message
+  (Bot API 10.3) that only the member filling it in can see; with an ephemeral
+  entry command and `force_reply`, the answers stay invisible too.
+
+### Ephemeral messages in groups
+
+An ephemeral message needs a receiver and, unless the bot is a chat admin, a
+trigger no older than 15 seconds: a button press (`callback_query_id`) or an
+ephemeral command. Both come from the update, so pass `event_sender_factory`
+instead of `sender_factory`:
+
+```python
+from dialog_engine.integrations.aiogram import EphemeralSender, ephemeral_in_groups
+
+router = build_dialog_router(runner, event_sender_factory=EphemeralSender.for_event)
+# or: ephemeral in groups, plain messages in private chats
+router = build_dialog_router(runner, event_sender_factory=ephemeral_in_groups)
+
+@start_router.message(Command("homework"))
+async def start(message: Message, state: FSMContext) -> None:
+    await runner.start(state, EphemeralSender.for_event(message))
+```
+
+Steps are edited in place with `editEphemeralMessageText`; the 15-second window
+limits sending, not editing, so a wizard keeps working for as long as the user
+takes. If the message is gone (the client restarted or it expired), the edit
+fails with `MESSAGE_NOT_FOUND` and a new message is sent — which again needs a
+fresh trigger or admin rights. Requires `aiogram>=3.31`.
+
+#### A wizard the group never sees
+
+A user's reply to an ephemeral message is itself ephemeral, so the whole
+conversation can stay invisible to everyone else:
+
+- Declare the entry command with `is_ephemeral=True` in `setMyCommands`. The
+  user's command is then delivered to the bot alone, and answering it needs no
+  admin rights — `EphemeralSender.for_event(message)` replies to it.
+- Set `KeyboardLayout(force_reply=True)`. The client opens the reply field, so
+  the answer arrives as a reply and stays ephemeral. Telegram forbids changing
+  `force_reply` when a keyboard is edited, so it applies to every step of the
+  dialog, including button-only ones.
+- Leave `text_answers` alone: ephemeral answers are never deleted (there is
+  nothing to hide and `deleteMessage` does not accept them). The policy only
+  covers ordinary messages, which the group can read.
+
+Verified live on Bot API 10.3: command, questions and answers all carry the
+"visible only to you" mark, and nothing lands in the group timeline.
 
 Full example: [examples/aiogram_homework_wizard.py](examples/aiogram_homework_wizard.py).
 

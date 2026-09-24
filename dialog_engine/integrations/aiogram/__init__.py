@@ -1,12 +1,13 @@
 """Интеграция dialog_engine с aiogram 3.
 
-Слой собран из четырёх независимых частей, чтобы каждую можно было заменить:
+Слой собран из независимых частей, чтобы каждую можно было заменить:
 
 * :mod:`.callbacks` — компактный формат ``callback_data`` (лимит 64 байта);
 * :mod:`.keyboards` — сборка inline-клавиатуры с пагинацией;
 * :mod:`.storage` — сохранение сессии в ``FSMContext``;
 * :mod:`.views` — протокол доставки :class:`DialogSender` и реализация
   по умолчанию на обычных сообщениях;
+* :mod:`.ephemeral` — доставка эфемерными сообщениями в группах;
 * :mod:`.runner` — ход анкеты поверх всего перечисленного;
 * :mod:`.router` — фильтры и готовый роутер aiogram.
 
@@ -42,6 +43,7 @@ from .callbacks import (
     find_step_by_token,
     step_token,
 )
+from .ephemeral import EphemeralSender, ephemeral_in_groups
 from .keyboards import (
     DEFAULT_LAYOUT,
     KeyboardLayout,
@@ -55,6 +57,9 @@ from .keyboards import (
 from .router import (
     DialogActiveFilter,
     DialogCallbackFilter,
+    EventSenderFactory,
+    SenderFactory,
+    TextAnswerPolicy,
     build_dialog_router,
 )
 from .runner import DialogRunner, DialogTurn
@@ -86,11 +91,17 @@ __all__ = [
     "DialogSender",
     "MessageAnchor",
     "StepView",
+    # ephemeral
+    "EphemeralSender",
+    "ephemeral_in_groups",
     # runner
     "DialogRunner",
     "DialogTurn",
     # router
     "DialogActiveFilter",
     "DialogCallbackFilter",
+    "EventSenderFactory",
+    "SenderFactory",
+    "TextAnswerPolicy",
     "build_dialog_router",
 ]

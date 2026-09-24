@@ -8,7 +8,8 @@
 Зашить отправку внутрь значило бы закрыть потребителю все эти пути, поэтому
 здесь описан только протокол :class:`DialogSender`, а конкретная доставка —
 дело потребителя. :class:`DefaultSender` — рабочая реализация на обычных
-сообщениях, которую предполагается заменять, а не дорабатывать.
+сообщениях, которую предполагается заменять, а не дорабатывать; эфемерная
+доставка — в :mod:`.ephemeral`.
 """
 
 from __future__ import annotations
@@ -33,13 +34,33 @@ class MessageAnchor:
 
     chat_id: int | str
     message_id: int
+    """Для эфемерного сообщения — ``ephemeral_message_id``: его ``message_id``
+    в Telegram всегда ``0``."""
+
+    receiver_user_id: int | None = None
+    """Получатель эфемерного сообщения; ``None`` — сообщение обычное."""
+
+    @property
+    def is_ephemeral(self) -> bool:
+        return self.receiver_user_id is not None
 
     def to_dict(self) -> dict[str, int | str]:
-        return {"chat_id": self.chat_id, "message_id": self.message_id}
+        data: dict[str, int | str] = {
+            "chat_id": self.chat_id,
+            "message_id": self.message_id,
+        }
+        if self.receiver_user_id is not None:
+            data["receiver_user_id"] = self.receiver_user_id
+        return data
 
     @classmethod
     def from_dict(cls, data: dict[str, int | str]) -> MessageAnchor:
-        return cls(chat_id=data["chat_id"], message_id=int(data["message_id"]))
+        receiver = data.get("receiver_user_id")
+        return cls(
+            chat_id=data["chat_id"],
+            message_id=int(data["message_id"]),
+            receiver_user_id=int(receiver) if receiver is not None else None,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,14 +123,27 @@ class DefaultSender:
         self, view: StepView, anchor: MessageAnchor | None
     ) -> MessageAnchor | None:
         text = self.render_text(view)
-        if anchor is not None:
+        if anchor is not None and self._can_edit(anchor):
             edited = await self._try_edit(anchor, text, view.keyboard)
             if edited:
                 return anchor
             # Сообщение могли удалить или оно стало слишком старым для правки —
             # тогда единственный способ не потерять диалог — прислать новое.
+        return await self._send(text, view.keyboard)
+
+    def _can_edit(self, anchor: MessageAnchor) -> bool:
+        """Можно ли править *anchor* этим способом доставки.
+
+        У эфемерного якоря ``message_id`` — это ``ephemeral_message_id``, и
+        ``edit_message_text`` с ним попал бы в чужое обычное сообщение.
+        """
+        return not anchor.is_ephemeral
+
+    async def _send(
+        self, text: str, keyboard: InlineKeyboardMarkup | None
+    ) -> MessageAnchor:
         message = await self.bot.send_message(
-            chat_id=self.chat_id, text=text, reply_markup=view.keyboard
+            chat_id=self.chat_id, text=text, reply_markup=keyboard
         )
         return MessageAnchor(chat_id=message.chat.id, message_id=message.message_id)
 
@@ -120,14 +154,22 @@ class DefaultSender:
         keyboard: InlineKeyboardMarkup | None,
     ) -> bool:
         try:
-            await self.bot.edit_message_text(
-                chat_id=anchor.chat_id,
-                message_id=anchor.message_id,
-                text=text,
-                reply_markup=keyboard,
-            )
+            await self._edit(anchor, text, keyboard)
         except TelegramBadRequest as exc:
             # «message is not modified» означает, что на экране уже нужное
             # состояние: повторная отрисовка той же страницы — не ошибка.
             return "message is not modified" in str(exc)
         return True
+
+    async def _edit(
+        self,
+        anchor: MessageAnchor,
+        text: str,
+        keyboard: InlineKeyboardMarkup | None,
+    ) -> None:
+        await self.bot.edit_message_text(
+            chat_id=anchor.chat_id,
+            message_id=anchor.message_id,
+            text=text,
+            reply_markup=keyboard,
+        )
