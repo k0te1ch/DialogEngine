@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/k0te1ch/DialogEngine/compare/v0.2.0...v0.3.0) (2026-09-24)
+
+
+### Features
+
+* **aiogram:** add ephemeral message support ([#10](https://github.com/k0te1ch/DialogEngine/issues/10)) ([426ff4a](https://github.com/k0te1ch/DialogEngine/commit/426ff4ad9285fac020c3db7eeb1cc8102817f5ef))
+
 ## [0.2.0](https://github.com/k0te1ch/DialogEngine/compare/v0.1.0...v0.2.0) (2026-09-20)
 
 
