@@ -49,6 +49,15 @@ class KeyboardLayout:
     show_back: bool = True
     show_cancel: bool = False
 
+    force_reply: bool = False
+    """Открывать у пользователя поле ответа на сообщение диалога.
+
+    Нужно эфемерному режиму: ответ, отправленный как reply на эфемерное
+    сообщение, сам уходит эфемерно и остальным участникам не виден. Telegram
+    запрещает менять это поле при правке клавиатуры, поэтому оно действует на
+    все шаги диалога, а не только на текстовые.
+    """
+
 
 DEFAULT_LAYOUT = KeyboardLayout()
 
@@ -171,7 +180,9 @@ def render_keyboard(
     if service:
         rows.append(service)
 
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    return InlineKeyboardMarkup(
+        inline_keyboard=rows, force_reply=layout.force_reply or None
+    )
 
 
 def _pagination_row(

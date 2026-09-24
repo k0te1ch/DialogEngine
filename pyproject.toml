@@ -11,13 +11,14 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development :: Libraries",
+    "Typing :: Typed",
 ]
 dependencies = []
 
 [project.optional-dependencies]
 validation = ["pydantic>=2.0,<3.0"]
 yaml = ["PyYAML>=6.0"]
-aiogram = ["aiogram>=3.0,<4.0"]
+aiogram = ["aiogram>=3.31,<4.0; python_version < '3.15'"]
 
 [project.urls]
 Homepage = "https://github.com/k0te1ch/DialogEngine"

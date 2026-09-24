@@ -239,3 +239,13 @@ def _actions(markup):
         for row in markup.inline_keyboard
         for button in row
     }
+
+
+def test_force_reply_is_off_by_default():
+    assert render_keyboard(choice_step()).force_reply is None
+
+
+def test_force_reply_is_set_for_every_step():
+    layout = KeyboardLayout(force_reply=True)
+
+    assert render_keyboard(choice_step(), layout=layout).force_reply is True
