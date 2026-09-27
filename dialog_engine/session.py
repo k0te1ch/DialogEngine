@@ -26,6 +26,7 @@ class DialogSession:
         context:   Caller data for this run (language, IDs, values computed by
                    step validators).  Must be JSON-serialisable: it is stored
                    together with the session.
+        dialog_version: Schema version of the engine that created the session.
 
     Internal:
         _history:  Stack of visited step indices.  ``_history[-1]`` is always
@@ -36,6 +37,7 @@ class DialogSession:
     answers: dict[str, Any] = field(default_factory=dict)
     status: SessionStatus = SessionStatus.IN_PROGRESS
     context: dict[str, Any] = field(default_factory=dict)
+    dialog_version: str | int | None = None
     _history: list[int] = field(default_factory=list, repr=False)
 
     # ── Properties ────────────────────────────────────────────────────────────
@@ -60,6 +62,7 @@ class DialogSession:
             "history": list(self._history),
             "status": self.status.value,
             "context": self.context,
+            "dialog_version": self.dialog_version,
         }
 
     @classmethod
@@ -71,6 +74,7 @@ class DialogSession:
             status=SessionStatus(data.get("status", SessionStatus.IN_PROGRESS)),
             # Sessions saved before 0.3 have no context.
             context=dict(data.get("context") or {}),
+            dialog_version=data.get("dialog_version"),
         )
         session._history = list(data.get("history", []))
         return session

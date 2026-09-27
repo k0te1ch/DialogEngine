@@ -8,14 +8,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
+from functools import partial
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from dialog_engine.step import DialogStep
 
-from .callbacks import DialogAction, build
+from .callbacks import DialogAction
+from .callbacks import build as build_payload
 
 BOOLEAN_KEYS = ("true", "false")
 """Ключи, которые уходят валидатору для шага типа ``boolean``."""
@@ -130,6 +132,7 @@ def render_keyboard(
     selected: Iterable[str] = (),
     can_go_back: bool = False,
     layout: KeyboardLayout = DEFAULT_LAYOUT,
+    dialog_id: str | None = None,
 ) -> InlineKeyboardMarkup:
     """Собрать клавиатуру шага.
 
@@ -141,7 +144,9 @@ def render_keyboard(
         can_go_back: показывать ли «Назад». Решение принимает вызывающий:
             клавиатура не видит историю сессии.
         layout: параметры отрисовки.
+        dialog_id: анкета, к которой привязать кнопки (см. :mod:`.callbacks`).
     """
+    build = partial(build_payload, dialog_id=dialog_id)
     options = step_options(step, layout)
     total_pages = page_count(len(options), layout.page_size)
     current = clamp_page(page, total_pages)
@@ -164,7 +169,7 @@ def render_keyboard(
         rows.append(row)
 
     if total_pages > 1:
-        rows.append(_pagination_row(step, current, total_pages, layout))
+        rows.append(_pagination_row(step, current, total_pages, layout, build))
 
     if step.type == "multi_choice":
         rows.append(
@@ -176,7 +181,7 @@ def render_keyboard(
             ]
         )
 
-    service = _service_row(step, can_go_back=can_go_back, layout=layout)
+    service = _service_row(step, can_go_back=can_go_back, layout=layout, build=build)
     if service:
         rows.append(service)
 
@@ -190,6 +195,7 @@ def _pagination_row(
     page: int,
     total_pages: int,
     layout: KeyboardLayout,
+    build: Callable[..., str] = build_payload,
 ) -> list[InlineKeyboardButton]:
     """Ряд «‹ 2/3 ›».
 
@@ -219,6 +225,7 @@ def _service_row(
     *,
     can_go_back: bool,
     layout: KeyboardLayout,
+    build: Callable[..., str] = build_payload,
 ) -> list[InlineKeyboardButton]:
     """Ряд служебных кнопок: «Назад», «Пропустить», «Отмена»."""
     row: list[InlineKeyboardButton] = []

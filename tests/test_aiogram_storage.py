@@ -108,3 +108,54 @@ def test_ui_state_reset_keeps_the_anchor():
     assert ui.page == 0
     assert ui.selected == []
     assert ui.anchor == MessageAnchor(42, 100)
+
+
+# ── Несколько анкет в одном чате ─────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_for_engine_keys_by_dialog_and_scope(state):
+    upload = DialogEngine.from_list(STEPS, dialog_id="upload")
+    assert FSMDialogStorage.for_engine(upload).key == "dialog_engine:upload"
+    first = FSMDialogStorage.for_engine(upload, scope=100)
+    second = FSMDialogStorage.for_engine(upload, scope=101)
+    assert first.key == "dialog_engine:upload:100"
+
+    await first.save(state, upload.create_session(), DialogUIState())
+    assert (await second.load(state))[0] is None
+    assert (await first.load(state))[0] is not None
+
+
+@pytest.mark.asyncio
+async def test_legacy_key_migrates_own_session(state):
+    upload = DialogEngine.from_list(STEPS, dialog_id="upload")
+    session = upload.create_session()
+    upload.submit(session, "Алиса")
+    await FSMDialogStorage().save(state, session, DialogUIState(page=1))
+
+    storage = FSMDialogStorage.for_engine(upload)
+    restored, ui = await storage.load(state)
+    assert restored.answers == {"name": "Алиса"}
+    assert ui.page == 1
+    data = await state.get_data()
+    assert "dialog_engine" not in data
+    assert "dialog_engine:upload" in data
+
+
+@pytest.mark.asyncio
+async def test_legacy_key_with_foreign_session_is_left_alone(state):
+    upload = DialogEngine.from_list(STEPS, dialog_id="upload")
+    other = DialogEngine.from_list(STEPS, dialog_id="other")
+    await FSMDialogStorage().save(state, other.create_session(), DialogUIState())
+
+    assert (await FSMDialogStorage.for_engine(upload).load(state))[0] is None
+    assert "dialog_engine" in await state.get_data()
+
+
+@pytest.mark.asyncio
+async def test_foreign_session_under_own_key_is_ignored(state):
+    upload = DialogEngine.from_list(STEPS, dialog_id="upload")
+    other = DialogEngine.from_list(STEPS, dialog_id="other")
+    storage = FSMDialogStorage.for_engine(upload)
+    await storage.save(state, other.create_session(), DialogUIState())
+    assert (await storage.load(state))[0] is None

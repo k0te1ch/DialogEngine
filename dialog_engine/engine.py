@@ -122,10 +122,17 @@ class DialogEngine:
         steps: list[DialogStep],
         dialog_id: str = "dialog",
         text_resolver: TextResolver | AsyncTextResolver | None = None,
+        version: str | int | None = None,
     ) -> None:
+        """Create an engine for *steps*.
+
+        *version* marks incompatible schema changes: a session saved under
+        another version is not restored (see :meth:`restore_session`).
+        """
         if not steps:
             raise DialogError("A dialog must have at least one step.")
         self.dialog_id = dialog_id
+        self.version = version
         self.steps = list(steps)
         self._by_id: dict[str, int] = {s.id: i for i, s in enumerate(steps)}
         self.text_resolver: TextResolver | AsyncTextResolver = (
@@ -153,13 +160,16 @@ class DialogEngine:
         if isinstance(raw, dict):
             dialog_id: str = raw.get("id", path.stem)
             steps_data: list[dict] = raw["steps"]
+            version = raw.get("version")
         else:
             dialog_id = path.stem
             steps_data = raw
+            version = None
         engine = cls(
             [DialogStep.from_dict(s) for s in steps_data],
             dialog_id=dialog_id,
             text_resolver=text_resolver,
+            version=version,
         )
         engine._attach_validators(validators)
         return engine
@@ -171,6 +181,7 @@ class DialogEngine:
         dialog_id: str = "dialog",
         text_resolver: TextResolver | AsyncTextResolver | None = None,
         validators: dict[str, StepValidator] | None = None,
+        version: str | int | None = None,
     ) -> DialogEngine:
         """Create a dialog from a list of step dicts.
 
@@ -181,6 +192,7 @@ class DialogEngine:
             [DialogStep.from_dict(s) for s in data],
             dialog_id=dialog_id,
             text_resolver=text_resolver,
+            version=version,
         )
         engine._attach_validators(validators)
         return engine
@@ -199,13 +211,30 @@ class DialogEngine:
             raise DialogError(
                 f"start_index {start_index} is out of range (0–{len(self.steps) - 1})."
             )
-        session = DialogSession(dialog_id=self.dialog_id, context=dict(context or {}))
+        session = DialogSession(
+            dialog_id=self.dialog_id,
+            context=dict(context or {}),
+            dialog_version=self.version,
+        )
         session._history = [start_index]
         return session
 
-    def restore_session(self, data: dict[str, Any]) -> DialogSession:
-        """Restore a session from a previously serialised dict."""
-        return DialogSession.from_dict(data)
+    def restore_session(self, data: dict[str, Any]) -> DialogSession | None:
+        """Restore a session from a previously serialised dict.
+
+        Returns ``None`` when the session is not this dialog's: another
+        ``dialog_id``, another :attr:`version` (if the engine has one), or a
+        position outside the current schema.  Picking up someone else's
+        session would feed answers to the wrong steps.
+        """
+        session = DialogSession.from_dict(data)
+        if session.dialog_id != self.dialog_id:
+            return None
+        if self.version is not None and session.dialog_version != self.version:
+            return None
+        if any(not 0 <= i < len(self.steps) for i in session._history):
+            return None
+        return session
 
     # ── Navigation ────────────────────────────────────────────────────────────
 
@@ -490,10 +519,11 @@ class DialogEngine:
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise the dialog schema to a plain dict."""
-        return {
-            "id": self.dialog_id,
-            "steps": [s.to_dict() for s in self.steps],
-        }
+        data: dict[str, Any] = {"id": self.dialog_id}
+        if self.version is not None:
+            data["version"] = self.version
+        data["steps"] = [s.to_dict() for s in self.steps]
+        return data
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
