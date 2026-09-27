@@ -53,6 +53,8 @@ class DialogTurn:
 
     finished: bool = False
     cancelled: bool = False
+    expired: bool = False
+    """Сессия истекла по ``ttl`` движка; вместе с ним стоит ``cancelled``."""
     answers: dict[str, Any] = field(default_factory=dict)
     """Собранные ответы — заполняются при ``finished``."""
 
@@ -126,6 +128,8 @@ class DialogRunner:
             return DialogTurn(handled=False)
 
         session, ui = await self.storage.load(state)
+        if session is not None and self.engine.is_expired(session):
+            return await self._expire(session, ui, state, sender)
         step = await self._require_step(session, state)
         if session is None or step is None:
             return DialogTurn(
@@ -144,6 +148,8 @@ class DialogRunner:
     ) -> DialogTurn:
         """Обработать текстовый ответ на шаг ``text`` / ``number`` / ``email``."""
         session, ui = await self.storage.load(state)
+        if session is not None and self.engine.is_expired(session):
+            return await self._expire(session, ui, state, sender)
         step = await self._require_step(session, state)
         if session is None or step is None:
             return DialogTurn(
@@ -170,6 +176,8 @@ class DialogRunner:
         количество и ограничения шага; на остальных шагах — ошибка.
         """
         session, ui = await self.storage.load(state)
+        if session is not None and self.engine.is_expired(session):
+            return await self._expire(session, ui, state, sender)
         step = await self._require_step(session, state)
         if session is None or step is None:
             return DialogTurn(
@@ -190,12 +198,28 @@ class DialogRunner:
         а не текст: их извлечение из апдейта остаётся за потребителем.
         """
         session, ui = await self.storage.load(state)
+        if session is not None and self.engine.is_expired(session):
+            return await self._expire(session, ui, state, sender)
         step = await self._require_step(session, state)
         if session is None or step is None:
             return DialogTurn(
                 handled=False, alert=await self._text("de.alert.no_session", session)
             )
         return await self._submit(value, session, ui, state, sender)
+
+    async def _expire(
+        self,
+        session: DialogSession,
+        ui: DialogUIState,
+        state: FSMContext,
+        sender: DialogSender,
+    ) -> DialogTurn:
+        """Закрыть истёкшую анкету: заменить шаг сообщением и убрать сессию."""
+        text = await self._text("de.alert.expired", session)
+        if ui.anchor is not None:
+            await sender.show(StepView(text=text), ui.anchor)
+        await self.storage.clear(state)
+        return DialogTurn(cancelled=True, expired=True, alert=text)
 
     async def _reject(
         self,

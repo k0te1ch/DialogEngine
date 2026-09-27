@@ -4,11 +4,18 @@ from __future__ import annotations
 
 import inspect
 import json
+import time
 from collections.abc import Awaitable, Callable
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
-from .exceptions import DialogError, StepNotFoundError, ValidationError
+from .exceptions import (
+    DialogError,
+    SessionExpiredError,
+    StepNotFoundError,
+    ValidationError,
+)
 from .session import DialogSession, SessionStatus
 from .step import DialogStep, StepContext, StepValidator
 from .validators import async_validate as _async_validate
@@ -136,8 +143,14 @@ class DialogEngine:
         dialog_id: str = "dialog",
         text_resolver: TextResolver | AsyncTextResolver | None = None,
         version: str | int | None = None,
+        ttl: float | timedelta | None = None,
+        clock: Callable[[], float] = time.time,
     ) -> None:
         """Create an engine for *steps*.
+
+        *ttl* (seconds or a ``timedelta``) limits how long a session may sit
+        idle: every step taken extends it, and an expired session is neither
+        restored nor advanced.  *clock* returns UNIX time; replace it in tests.
 
         *version* marks incompatible schema changes: a session saved under
         another version is not restored (see :meth:`restore_session`).
@@ -146,6 +159,8 @@ class DialogEngine:
             raise DialogError("A dialog must have at least one step.")
         self.dialog_id = dialog_id
         self.version = version
+        self.ttl = ttl.total_seconds() if isinstance(ttl, timedelta) else ttl
+        self._clock = clock
         self.steps = list(steps)
         self._by_id: dict[str, int] = {s.id: i for i, s in enumerate(steps)}
         self.text_resolver: TextResolver | AsyncTextResolver = (
@@ -162,6 +177,7 @@ class DialogEngine:
         path: str | Path,
         text_resolver: TextResolver | AsyncTextResolver | None = None,
         validators: dict[str, StepValidator] | None = None,
+        ttl: float | timedelta | None = None,
     ) -> DialogEngine:
         """Load a dialog from a JSON file.
 
@@ -183,6 +199,7 @@ class DialogEngine:
             dialog_id=dialog_id,
             text_resolver=text_resolver,
             version=version,
+            ttl=ttl,
         )
         engine._attach_validators(validators)
         return engine
@@ -195,6 +212,7 @@ class DialogEngine:
         text_resolver: TextResolver | AsyncTextResolver | None = None,
         validators: dict[str, StepValidator] | None = None,
         version: str | int | None = None,
+        ttl: float | timedelta | None = None,
     ) -> DialogEngine:
         """Create a dialog from a list of step dicts.
 
@@ -206,6 +224,7 @@ class DialogEngine:
             dialog_id=dialog_id,
             text_resolver=text_resolver,
             version=version,
+            ttl=ttl,
         )
         engine._attach_validators(validators)
         return engine
@@ -230,15 +249,20 @@ class DialogEngine:
             dialog_version=self.version,
         )
         session._history = [start_index]
+        self._touch(session)
         return session
 
-    def restore_session(self, data: dict[str, Any]) -> DialogSession | None:
+    def restore_session(
+        self, data: dict[str, Any], *, allow_expired: bool = False
+    ) -> DialogSession | None:
         """Restore a session from a previously serialised dict.
 
         Returns ``None`` when the session is not this dialog's: another
         ``dialog_id``, another :attr:`version` (if the engine has one), or a
         position outside the current schema.  Picking up someone else's
-        session would feed answers to the wrong steps.
+        session would feed answers to the wrong steps.  An expired session
+        (see *ttl*) is also ``None`` unless *allow_expired* is set, for a
+        caller that wants to tell the user the dialog timed out.
         """
         session = DialogSession.from_dict(data)
         if session.dialog_id != self.dialog_id:
@@ -246,6 +270,8 @@ class DialogEngine:
         if self.version is not None and session.dialog_version != self.version:
             return None
         if any(not 0 <= i < len(self.steps) for i in session._history):
+            return None
+        if not allow_expired and self.is_expired(session):
             return None
         return session
 
@@ -352,6 +378,7 @@ class DialogEngine:
         # a draft the user can keep.
         prev_step = self.steps[session._history[-1]]
         self._to_draft(session, prev_step.id)
+        self._touch(session)
         return prev_step
 
     async def async_back(self, session: DialogSession) -> DialogStep:
@@ -371,6 +398,7 @@ class DialogEngine:
         # a draft the user can keep.
         prev_step = self.steps[session._history[-1]]
         self._to_draft(session, prev_step.id)
+        self._touch(session)
         return prev_step
 
     def jump_to(
@@ -395,7 +423,12 @@ class DialogEngine:
         session.return_to = return_to
         session._history.append(idx)
         self._to_draft(session, step_id)
+        self._touch(session)
         return self.steps[idx]
+
+    def is_expired(self, session: DialogSession) -> bool:
+        """Whether the session sat idle past its ``expires_at``."""
+        return session.expires_at is not None and self._clock() >= session.expires_at
 
     def draft(self, session: DialogSession) -> Any:
         """Previous answer of the current step, if it was taken back; else ``None``."""
@@ -553,6 +586,12 @@ class DialogEngine:
     def _assert_active(self, session: DialogSession) -> None:
         if not session.is_active:
             raise DialogError(f"Session is {session.status.value}, not in-progress.")
+        if self.is_expired(session):
+            raise SessionExpiredError("Session has expired.")
+
+    def _touch(self, session: DialogSession) -> None:
+        if self.ttl is not None:
+            session.expires_at = self._clock() + self.ttl
 
     @staticmethod
     def _fill_summary(
@@ -576,6 +615,7 @@ class DialogEngine:
     ) -> DialogStep | None:
         session.answers[step.id] = value
         session.drafts.pop(step.id, None)
+        self._touch(session)
         next_idx = self._resolve_next_index(step, value, session.current_index)
         if session.return_to is not None:
             next_idx = self._fast_forward(session, next_idx)

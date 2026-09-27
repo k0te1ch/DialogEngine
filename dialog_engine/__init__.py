@@ -25,6 +25,7 @@ Classes:
 Exceptions:
     DialogError         — base exception
     StepNotFoundError   — unknown step ID referenced
+    SessionExpiredError — acting on a session past its ttl
     ValidationError     — submitted answer fails validation
 
 Types:
@@ -39,7 +40,12 @@ Constants:
 """
 
 from .engine import DialogEngine, TextResolver
-from .exceptions import DialogError, StepNotFoundError, ValidationError
+from .exceptions import (
+    DialogError,
+    SessionExpiredError,
+    StepNotFoundError,
+    ValidationError,
+)
 from .files import FileInfo
 from .messages import DEFAULT_MESSAGES
 from .session import DialogSession, SessionStatus
@@ -67,6 +73,7 @@ __all__ = [
     # Exceptions
     "DialogError",
     "StepNotFoundError",
+    "SessionExpiredError",
     "ValidationError",
     # Metadata
     "__version__",

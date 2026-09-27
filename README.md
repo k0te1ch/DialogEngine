@@ -129,6 +129,17 @@ empty `choices` it is a plain "are you sure?" step. In aiogram, the runner
 draws the edit buttons and a confirm button (`de.button.confirm`). Telegram
 limits a message to 4096 characters, so keep summaries short.
 
+## Session time-to-live
+
+`DialogEngine(..., ttl=600)` (seconds or a `timedelta`; also on `from_list` /
+`from_file`) makes abandoned sessions expire. `expires_at` is a UTC UNIX
+timestamp stored with the session and extended by every step, so the limit
+is on idle time, not total time. An expired session is not restored
+(`restore_session()` returns `None` unless `allow_expired=True`) and cannot be
+advanced (`SessionExpiredError`). The aiogram runner replaces the step with
+`de.alert.expired`, clears the session and returns a turn with
+`expired=True` and `cancelled=True`, so `on_cancel` runs.
+
 ## Translating errors and labels
 
 Every built-in validation error has a message key (`ValidationError.key`) and
@@ -164,7 +175,7 @@ A custom validator can raise `ValidationError("my.key")` or pass
 | `de.error.file.expected`, `de.error.photo.expected`, `de.error.media.unexpected` | — |
 | `de.button.back` / `.skip` / `.cancel` / `.done` / `.yes` / `.no` / `.keep` / `.confirm` | — |
 | `de.button.keep_value` | `value` |
-| `de.error.button_required`, `de.alert.no_session`, `de.alert.stale_button` | — |
+| `de.error.button_required`, `de.alert.no_session`, `de.alert.stale_button`, `de.alert.expired` | — |
 
 A resolver that does not know a `de.button.*` key keeps the text from
 `KeyboardLayout`, so layouts customised by hand still work.

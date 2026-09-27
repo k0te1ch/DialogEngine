@@ -15,6 +15,10 @@ class StepNotFoundError(DialogError):
         self.step_id = step_id
 
 
+class SessionExpiredError(DialogError):
+    """Raised when acting on a session whose time-to-live has run out."""
+
+
 class ValidationError(DialogError):
     """Raised when a submitted answer fails validation.
 

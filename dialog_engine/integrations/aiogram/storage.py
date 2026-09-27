@@ -134,7 +134,8 @@ class FSMDialogStorage:
         self, raw: dict[str, Any]
     ) -> tuple[DialogSession | None, DialogUIState]:
         if self.engine is not None:
-            session = self.engine.restore_session(raw["session"])
+            # Истёкшую сессию отдаём раннеру: он сам скажет, что анкета устарела.
+            session = self.engine.restore_session(raw["session"], allow_expired=True)
         else:
             session = DialogSession.from_dict(raw["session"])
         if session is None:
