@@ -96,6 +96,43 @@ With aiogram, pass the context to `runner.start(state, sender, context=...)`;
 the final `DialogTurn.context` returns it. The old process-wide
 `_ASYNC_VALIDATORS` registry still works but is deprecated.
 
+## Translating errors and labels
+
+Every built-in validation error has a message key (`ValidationError.key`) and
+placeholder values (`ValidationError.params`); the aiogram layer also asks the
+resolver for its service buttons, alerts and the labels of `choices`. The
+resolver receives the key like any step text: return a translation, or the key
+unchanged to keep the built-in Russian text. Placeholders are filled after
+translation.
+
+```python
+EN = {"de.error.text.min": "At least {min} characters", "de.button.back": "Back"}
+
+def resolver(key, answers, context):
+    return EN.get(key, key) if context.get("lang") == "en" else key
+
+engine.resolve_error(exc, session)  # → "At least 3 characters"
+```
+
+A custom validator can raise `ValidationError("my.key")` or pass
+`key=` / `params=` explicitly. The full list of keys with default texts is
+`dialog_engine.DEFAULT_MESSAGES`:
+
+| Key | Placeholders |
+|---|---|
+| `de.error.required` | — |
+| `de.error.text.min` / `.max` / `.pattern` | `min` / `max` / — |
+| `de.error.number.invalid` / `.min` / `.max` | `value` / `min` / `max` |
+| `de.error.email.invalid`, `de.error.boolean.invalid` | `value` |
+| `de.error.choice.invalid` | `value`, `valid` |
+| `de.error.multi_choice.type` / `.invalid` / `.min` / `.max` | `value` / `value`, `valid` / `min` / `max` |
+| `de.error.photo.min` / `.max`, `de.error.file.min` / `.max` | `min` / `max` |
+| `de.button.back` / `.skip` / `.cancel` / `.done` / `.yes` / `.no` | — |
+| `de.error.button_required`, `de.alert.no_session`, `de.alert.stale_button` | — |
+
+A resolver that does not know a `de.button.*` key keeps the text from
+`KeyboardLayout`, so layouts customised by hand still work.
+
 ## aiogram 3 integration
 
 Optional layer that turns a dialog schema into a Telegram wizard. Install with

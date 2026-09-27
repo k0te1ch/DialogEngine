@@ -32,10 +32,14 @@ Types:
     StepContext     — what a step validator receives besides the value
     StepValidator   — signature of DialogStep.validator
     TextResolver    — Callable used by the engine to resolve display text
+
+Constants:
+    DEFAULT_MESSAGES — message keys and their built-in (Russian) texts
 """
 
 from .engine import DialogEngine, TextResolver
 from .exceptions import DialogError, StepNotFoundError, ValidationError
+from .messages import DEFAULT_MESSAGES
 from .session import DialogSession, SessionStatus
 from .step import DialogStep, StepContext, StepType, StepValidator
 from .validators import validate
@@ -56,6 +60,7 @@ __all__ = [
     "StepValidator",
     # Validators
     "validate",
+    "DEFAULT_MESSAGES",
     # Exceptions
     "DialogError",
     "StepNotFoundError",

@@ -16,13 +16,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from aiogram.fsm.context import FSMContext
 
 from dialog_engine.engine import DialogEngine
 from dialog_engine.exceptions import DialogError, ValidationError
+from dialog_engine.messages import DEFAULT_MESSAGES
 from dialog_engine.session import DialogSession
 from dialog_engine.step import DialogStep
 
@@ -34,9 +35,9 @@ from .views import DialogSender, StepView
 BUTTON_ONLY_TYPES = frozenset({"choice", "multi_choice", "boolean"})
 """Типы шагов, на которых текстовый ввод не принимается."""
 
-NO_SESSION_ALERT = "Диалог не запущен или уже завершён."
-STALE_BUTTON_ALERT = "Кнопка устарела — ответьте на текущий вопрос."
-BUTTON_REQUIRED_ERROR = "Выберите вариант с помощью кнопок."
+NO_SESSION_ALERT = DEFAULT_MESSAGES["de.alert.no_session"]
+STALE_BUTTON_ALERT = DEFAULT_MESSAGES["de.alert.stale_button"]
+BUTTON_REQUIRED_ERROR = DEFAULT_MESSAGES["de.error.button_required"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,7 +97,9 @@ class DialogRunner:
         """Отменить текущую анкету и очистить сохранённое состояние."""
         session, _ui = await self.storage.load(state)
         if session is None:
-            return DialogTurn(handled=False, alert=NO_SESSION_ALERT)
+            return DialogTurn(
+                handled=False, alert=await self._text("de.alert.no_session", session)
+            )
         self.engine.cancel(session)
         await self.storage.clear(state)
         return DialogTurn(cancelled=True)
@@ -119,12 +122,14 @@ class DialogRunner:
         session, ui = await self.storage.load(state)
         step = await self._require_step(session, state)
         if session is None or step is None:
-            return DialogTurn(handled=False, alert=NO_SESSION_ALERT)
+            return DialogTurn(
+                handled=False, alert=await self._text("de.alert.no_session", session)
+            )
 
         if callback.step_token != step_token(step.id):
             # Нажали кнопку в сообщении от прошлого шага: молча подчиняться
             # такому нажатию опаснее, чем сказать, что оно устарело.
-            return DialogTurn(alert=STALE_BUTTON_ALERT)
+            return DialogTurn(alert=await self._text("de.alert.stale_button", session))
 
         return await self._dispatch(callback, step, session, ui, state, sender)
 
@@ -135,10 +140,13 @@ class DialogRunner:
         session, ui = await self.storage.load(state)
         step = await self._require_step(session, state)
         if session is None or step is None:
-            return DialogTurn(handled=False, alert=NO_SESSION_ALERT)
+            return DialogTurn(
+                handled=False, alert=await self._text("de.alert.no_session", session)
+            )
 
         if step.type in BUTTON_ONLY_TYPES:
-            await self._render(session, ui, sender, error=BUTTON_REQUIRED_ERROR)
+            error = await self._text("de.error.button_required", session)
+            await self._render(session, ui, sender, error=error)
             await self.storage.save(state, session, ui)
             return DialogTurn()
 
@@ -155,7 +163,9 @@ class DialogRunner:
         session, ui = await self.storage.load(state)
         step = await self._require_step(session, state)
         if session is None or step is None:
-            return DialogTurn(handled=False, alert=NO_SESSION_ALERT)
+            return DialogTurn(
+                handled=False, alert=await self._text("de.alert.no_session", session)
+            )
         return await self._submit(value, session, ui, state, sender)
 
     # ── Разбор действий ───────────────────────────────────────────────────────
@@ -212,7 +222,7 @@ class DialogRunner:
         """Нажатие на вариант ответа."""
         options = step_options(step, self.layout)
         if not 0 <= index < len(options):
-            return DialogTurn(alert=STALE_BUTTON_ALERT)
+            return DialogTurn(alert=await self._text("de.alert.stale_button", session))
         key = options[index].key
 
         if step.type != "multi_choice":
@@ -240,7 +250,8 @@ class DialogRunner:
         except ValidationError as exc:
             # Шаг не сбрасывается: пользователь видит ошибку над тем же
             # вопросом и отвечает заново.
-            await self._render(session, ui, sender, error=str(exc))
+            error = await self.engine.async_resolve_error(exc, session)
+            await self._render(session, ui, sender, error=error)
             await self.storage.save(state, session, ui)
             return DialogTurn()
 
@@ -304,15 +315,59 @@ class DialogRunner:
         return StepView(
             text=await self.engine.async_resolve_text(step, session),
             keyboard=render_keyboard(
-                step,
+                await self._translated_step(step, session),
                 page=ui.page,
                 selected=ui.selected,
                 can_go_back=position > 1,
-                layout=self.layout,
+                layout=await self._translated_layout(session),
             ),
             step=step,
             error=error,
             progress=(position, total),
+        )
+
+    async def _text(self, key: str, session: DialogSession | None) -> str:
+        return await self.engine.async_translate(
+            key, session, default=DEFAULT_MESSAGES[key]
+        )
+
+    async def _translated_step(
+        self, step: DialogStep, session: DialogSession
+    ) -> DialogStep:
+        """Копия шага с переведёнными подписями вариантов.
+
+        Меняются только подписи: ключи и их порядок те же, поэтому индексы в
+        ``callback_data`` совпадают с исходным шагом.
+        """
+        if not step.choices:
+            return step
+        choices = {
+            key: await self.engine.async_translate(label, session)
+            for key, label in step.choices.items()
+        }
+        return replace(step, choices=choices)
+
+    async def _translated_layout(self, session: DialogSession) -> KeyboardLayout:
+        """Раскладка с переведёнными служебными кнопками.
+
+        Резолвер, не знающий ключ ``de.button.*``, оставляет текст из
+        :attr:`layout` — так настроенные вручную подписи не теряются.
+        """
+        layout = self.layout
+
+        async def label(key: str, default: str) -> str:
+            return await self.engine.async_translate(key, session, default=default)
+
+        return replace(
+            layout,
+            back_text=await label("de.button.back", layout.back_text),
+            skip_text=await label("de.button.skip", layout.skip_text),
+            cancel_text=await label("de.button.cancel", layout.cancel_text),
+            done_text=await label("de.button.done", layout.done_text),
+            boolean_labels=(
+                await label("de.button.yes", layout.boolean_labels[0]),
+                await label("de.button.no", layout.boolean_labels[1]),
+            ),
         )
 
     async def _render(

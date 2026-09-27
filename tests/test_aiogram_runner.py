@@ -382,7 +382,9 @@ async def test_start_with_context_and_step_validator_error(state, sender):
         STEPS,
         dialog_id="homework",
         validators={"task": check},
-        text_resolver=lambda key, answers, context: f"[{context['lang']}] {key}",
+        text_resolver=lambda key, answers, context: (
+            f"[{context['lang']}] {key}" if key == "Выберите предмет" else key
+        ),
     )
     runner = DialogRunner(engine, layout=LAYOUT)
     await runner.start(state, sender, context={"lang": "en", "expected": "abcd"})
@@ -397,3 +399,55 @@ async def test_start_with_context_and_step_validator_error(state, sender):
     turn = await runner.submit_value("today", state, sender)
     assert turn.finished
     assert turn.context == {"lang": "en", "expected": "abcd", "checked": True}
+
+
+# ── Перевод подписей и ошибок ────────────────────────────────────────────────
+
+EN_LABELS = {
+    "Математика": "Math",
+    "Физика": "Physics",
+    "Программирование": "Coding",
+    "de.button.back": "Back",
+    "de.button.yes": "Yes",
+    "de.button.no": "No",
+    "de.error.text.min": "At least {min} characters",
+    "de.error.button_required": "Use the buttons",
+}
+
+
+def _en(key, answers, context):
+    return EN_LABELS.get(key, key) if context.get("lang") == "en" else key
+
+
+def _texts(view):
+    return [b.text for row in view.keyboard.inline_keyboard for b in row]
+
+
+@pytest.mark.asyncio
+async def test_labels_and_errors_translated(state, sender):
+    steps = [*STEPS, {"id": "ok", "type": "boolean", "text": "Ok?"}]
+    engine = DialogEngine.from_list(steps, dialog_id="homework", text_resolver=_en)
+    runner = DialogRunner(engine, layout=LAYOUT)
+    await runner.start(state, sender, context={"lang": "en"})
+    assert _texts(sender.last)[:2] == ["Math", "Physics"]
+
+    await runner.submit_value("math", state, sender)
+    await runner.on_text("ab", state, sender)
+    assert sender.last.error == "At least 3 characters"
+    assert "Back" in _texts(sender.last)
+
+    await runner.on_text("abcd", state, sender)
+    await runner.submit_value("today", state, sender)
+    assert _texts(sender.last)[:2] == ["Yes", "No"]
+    await runner.on_text("yes", state, sender)
+    assert sender.last.error == "Use the buttons"
+
+
+@pytest.mark.asyncio
+async def test_without_translation_labels_unchanged(runner, state, sender):
+    await runner.start(state, sender)
+    assert _texts(sender.last)[:2] == ["Математика", "Физика"]
+    await runner.submit_value("math", state, sender)
+    await runner.on_text("ab", state, sender)
+    assert sender.last.error == "Слишком короткий текст (минимум 3 символов)."
+    assert LAYOUT.back_text in _texts(sender.last)
