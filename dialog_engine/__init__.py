@@ -29,13 +29,15 @@ Exceptions:
 
 Types:
     StepType        — Literal union of all supported step type strings
+    StepContext     — what a step validator receives besides the value
+    StepValidator   — signature of DialogStep.validator
     TextResolver    — Callable used by the engine to resolve display text
 """
 
 from .engine import DialogEngine, TextResolver
 from .exceptions import DialogError, StepNotFoundError, ValidationError
 from .session import DialogSession, SessionStatus
-from .step import DialogStep, StepType
+from .step import DialogStep, StepContext, StepType, StepValidator
 from .validators import validate
 
 __version__ = "0.2.0"  # x-release-please-version
@@ -50,6 +52,8 @@ __all__ = [
     # Step
     "DialogStep",
     "StepType",
+    "StepContext",
+    "StepValidator",
     # Validators
     "validate",
     # Exceptions

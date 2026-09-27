@@ -62,6 +62,40 @@ The engine supports async validators and text resolvers via `async_submit` /
 `async_resolve_text`. See the full example in
 [examples/async_validators_example.py](examples/async_validators_example.py).
 
+## Step validators and session context
+
+A step can carry its own validator. It runs after the built-in check for the
+step type, may be sync or async, and receives a `StepContext` with the step,
+the answers so far and the session context. Return the value to store
+(`None` keeps it as is) or raise `ValidationError` to keep the user on the step.
+
+The session context holds caller data for one run — language, IDs, values
+computed by validators. It is saved with the session, so keep it
+JSON-serialisable. A text resolver that takes three arguments receives it too;
+two-argument resolvers keep working.
+
+```python
+from dialog_engine import DialogEngine, StepContext, ValidationError
+
+async def parse_template(text: str, ctx: StepContext) -> dict:
+    info = parse(text, kind=ctx.answers["kind"])
+    if info is None:
+        raise ValidationError("Template does not match", ctx.step.id)
+    ctx.context["number"] = info["number"]
+    return info
+
+engine = DialogEngine.from_list(
+    steps,
+    validators={"template": parse_template},
+    text_resolver=lambda key, answers, context: i18n[context["lang"]][key],
+)
+session = engine.create_session(context={"lang": "en"})
+```
+
+With aiogram, pass the context to `runner.start(state, sender, context=...)`;
+the final `DialogTurn.context` returns it. The old process-wide
+`_ASYNC_VALIDATORS` registry still works but is deprecated.
+
 ## aiogram 3 integration
 
 Optional layer that turns a dialog schema into a Telegram wizard. Install with
@@ -152,6 +186,7 @@ Full example: [examples/aiogram_homework_wizard.py](examples/aiogram_homework_wi
 - `DialogEngine` — loads a schema and drives the dialog flow.
 - `DialogSession` / `SessionStatus` — state of a single dialog run.
 - `DialogStep` / `StepType` — a step description and its type.
+- `StepContext` / `StepValidator` — the per-step validator contract.
 - `validate` — built-in answer validation.
 - `DialogError`, `ValidationError`, `StepNotFoundError` — exception hierarchy.
 

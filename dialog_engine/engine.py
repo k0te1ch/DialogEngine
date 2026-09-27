@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
+import inspect
 import json
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -10,30 +10,50 @@ from typing import Any
 
 from .exceptions import DialogError, StepNotFoundError
 from .session import DialogSession, SessionStatus
-from .step import DialogStep
+from .step import DialogStep, StepContext, StepValidator
 from .validators import async_validate as _async_validate
 from .validators import sync_validate as _validate
 
 # ── Text resolver type ────────────────────────────────────────────────────────
 
-TextResolver = Callable[[str, dict[str, Any]], str]
-AsyncTextResolver = Callable[[str, dict[str, Any]], Awaitable[str]]
+TextResolver = Callable[..., str]
+AsyncTextResolver = Callable[..., Awaitable[str]]
 """A callable that resolves a step's ``text`` field for display.
 
-Signature::
+Signature (sync or async)::
 
-    def resolver(key: str, context: dict[str, Any]) -> str: ...
+    def resolver(key: str, answers: dict[str, Any], context: dict[str, Any]) -> str
 
-*key* is ``step.text``; *context* carries the session answers so
-the resolver can interpolate dynamic values.
+*key* is ``step.text``; *answers* are the session answers and *context* is
+:attr:`DialogSession.context`, so the resolver can pick a language or
+interpolate values the caller put there.  The older two-argument form
+``resolver(key, answers)`` is still accepted.
 
 The default resolver returns *key* unchanged, which works well when
 ``text`` already contains the full display string.
 """
 
 
-def _passthrough_resolver(key: str, _ctx: dict[str, Any]) -> str:
+def _passthrough_resolver(key: str, _answers: dict[str, Any]) -> str:
     return key
+
+
+def _takes_context(fn: Callable[..., Any]) -> bool:
+    """Whether *fn* accepts a third positional argument (the session context)."""
+    try:
+        params = inspect.signature(fn).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    positional = 0
+    for p in params:
+        if p.kind is inspect.Parameter.VAR_POSITIONAL:
+            return True
+        if p.kind in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        ):
+            positional += 1
+    return positional >= 3
 
 
 # ── Engine ────────────────────────────────────────────────────────────────────
@@ -97,7 +117,8 @@ class DialogEngine:
         self.text_resolver: TextResolver | AsyncTextResolver = (
             text_resolver or _passthrough_resolver
         )
-        self._is_async_resolver = asyncio.iscoroutinefunction(text_resolver)
+        self._is_async_resolver = inspect.iscoroutinefunction(self.text_resolver)
+        self._resolver_takes_context = _takes_context(self.text_resolver)
 
     # ── Constructors ──────────────────────────────────────────────────────────
 
@@ -105,11 +126,13 @@ class DialogEngine:
     def from_file(
         cls,
         path: str | Path,
-        text_resolver: TextResolver | None = None,
+        text_resolver: TextResolver | AsyncTextResolver | None = None,
+        validators: dict[str, StepValidator] | None = None,
     ) -> DialogEngine:
         """Load a dialog from a JSON file.
 
         Supports both bare-list and wrapped-dict formats (see class docstring).
+        *validators* is the same as in :meth:`from_list`.
         """
         path = Path(path)
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -119,35 +142,50 @@ class DialogEngine:
         else:
             dialog_id = path.stem
             steps_data = raw
-        return cls(
+        engine = cls(
             [DialogStep.from_dict(s) for s in steps_data],
             dialog_id=dialog_id,
             text_resolver=text_resolver,
         )
+        engine._attach_validators(validators)
+        return engine
 
     @classmethod
     def from_list(
         cls,
         data: list[dict],
         dialog_id: str = "dialog",
-        text_resolver: TextResolver | None = None,
+        text_resolver: TextResolver | AsyncTextResolver | None = None,
+        validators: dict[str, StepValidator] | None = None,
     ) -> DialogEngine:
-        """Create a dialog from a list of step dicts."""
-        return cls(
+        """Create a dialog from a list of step dicts.
+
+        *validators* maps step IDs to :attr:`DialogStep.validator` — the
+        schema stays plain data, the code is attached here.
+        """
+        engine = cls(
             [DialogStep.from_dict(s) for s in data],
             dialog_id=dialog_id,
             text_resolver=text_resolver,
         )
+        engine._attach_validators(validators)
+        return engine
 
     # ── Session management ────────────────────────────────────────────────────
 
-    def create_session(self, start_index: int = 0) -> DialogSession:
-        """Create a fresh session starting at *start_index*."""
+    def create_session(
+        self, start_index: int = 0, *, context: dict[str, Any] | None = None
+    ) -> DialogSession:
+        """Create a fresh session starting at *start_index*.
+
+        *context* becomes :attr:`DialogSession.context` (copied); it must be
+        JSON-serialisable.
+        """
         if not (0 <= start_index < len(self.steps)):
             raise DialogError(
                 f"start_index {start_index} is out of range (0–{len(self.steps) - 1})."
             )
-        session = DialogSession(dialog_id=self.dialog_id)
+        session = DialogSession(dialog_id=self.dialog_id, context=dict(context or {}))
         session._history = [start_index]
         return session
 
@@ -180,7 +218,7 @@ class DialogEngine:
         self._assert_active(session)
         step = self._require_current(session)
 
-        cleaned = _validate(step, value)
+        cleaned = _validate(step, value, self._step_context(step, session))
         session.answers[step.id] = cleaned
 
         next_idx = self._resolve_next_index(step, cleaned, session.current_index)
@@ -210,7 +248,7 @@ class DialogEngine:
         self._assert_active(session)
         step = self._require_current(session)
 
-        cleaned = await _async_validate(step, value)
+        cleaned = await _async_validate(step, value, self._step_context(step, session))
         session.answers[step.id] = cleaned
 
         next_idx = self._resolve_next_index(step, cleaned, session.current_index)
@@ -328,15 +366,15 @@ class DialogEngine:
     ) -> str:
         """Return the display text for *step* via the :attr:`text_resolver`.
 
-        Passes session answers as context so the resolver can interpolate
-        dynamic values (e.g. ``"Hello {name}!"``).
+        Passes session answers (and the session context, if the resolver
+        takes it) so the resolver can interpolate dynamic values
+        (e.g. ``"Hello {name}!"``).
         """
-        ctx: dict[str, Any] = session.answers if session is not None else {}
         if self._is_async_resolver:
             raise DialogError(
                 "Async text resolver requires calling async_resolve_text() instead"
             )
-        return self.text_resolver(step.text, ctx)
+        return self.text_resolver(*self._resolver_args(step, session))
 
     async def async_resolve_text(
         self,
@@ -345,13 +383,11 @@ class DialogEngine:
     ) -> str:
         """Return the display text for *step* via the async :attr:`text_resolver`.
 
-        Passes session answers as context so the resolver can interpolate
-        dynamic values (e.g. ``"Hello {name}!"``).
+        Arguments are the same as for :meth:`resolve_text`.
         """
-        ctx: dict[str, Any] = session.answers if session is not None else {}
         if not self._is_async_resolver:
             return self.resolve_text(step, session)
-        return await self.text_resolver(step.text, ctx)
+        return await self.text_resolver(*self._resolver_args(step, session))
 
     def get_step(self, index: int) -> DialogStep | None:
         """Return the step at *index*, or ``None`` if out of range."""
@@ -394,6 +430,22 @@ class DialogEngine:
     def _assert_active(self, session: DialogSession) -> None:
         if not session.is_active:
             raise DialogError(f"Session is {session.status.value}, not in-progress.")
+
+    def _attach_validators(self, validators: dict[str, StepValidator] | None) -> None:
+        for step_id, fn in (validators or {}).items():
+            self.get_step_by_id(step_id).validator = fn
+
+    def _step_context(self, step: DialogStep, session: DialogSession) -> StepContext:
+        return StepContext(step=step, answers=session.answers, context=session.context)
+
+    def _resolver_args(
+        self, step: DialogStep, session: DialogSession | None
+    ) -> tuple[Any, ...]:
+        answers = session.answers if session is not None else {}
+        if not self._resolver_takes_context:
+            return step.text, answers
+        context = session.context if session is not None else {}
+        return step.text, answers, context
 
     def _require_current(self, session: DialogSession) -> DialogStep:
         step = self.current_step(session)

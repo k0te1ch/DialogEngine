@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -29,6 +30,31 @@ StepType = Literal[
 NextSpec = str | dict[str, str] | None
 
 
+@dataclass(frozen=True, slots=True)
+class StepContext:
+    """What a step validator sees besides the value itself.
+
+    Attributes:
+        step:    The step being answered.
+        answers: Answers collected so far (read it, don't mutate it).
+        context: The session context; a validator may write to it, e.g. to
+                 pass a computed value to the text of the following steps.
+    """
+
+    step: DialogStep
+    answers: dict[str, Any]
+    context: dict[str, Any]
+
+
+StepValidator = Callable[[Any, StepContext], Any | Awaitable[Any]]
+"""Per-step validator: ``(value, ctx) -> cleaned`` (sync or async).
+
+Receives the value already checked by the built-in validator of the step type.
+Returns the value to store; ``None`` keeps the value it received. Raises
+:class:`~dialog_engine.ValidationError` to reject the answer.
+"""
+
+
 @dataclass
 class DialogStep:
     """A single step in a dialog flow.
@@ -48,6 +74,10 @@ class DialogStep:
         pattern:  Regex pattern for *text* steps (applied via ``re.fullmatch``).
         next:     Branching spec (see module docstring).
         meta:     Arbitrary extra data; ignored by the engine.
+        validator: Optional :data:`StepValidator` run after the built-in
+                  checks.  Code, not data: it is not serialised by
+                  :meth:`to_dict` and has to be attached after
+                  :meth:`from_dict`.
     """
 
     id: str
@@ -60,6 +90,7 @@ class DialogStep:
     pattern: str | None = None
     next: NextSpec = None
     meta: dict[str, Any] = field(default_factory=dict)
+    validator: StepValidator | None = field(default=None, repr=False, compare=False)
 
     # ── Construction ──────────────────────────────────────────────────────────
 
