@@ -72,6 +72,10 @@ class DialogStep:
                   multi_choice → min selected options
         max:      Upper bound (same semantics as *min*).
         pattern:  Regex pattern for *text* steps (applied via ``re.fullmatch``).
+        mime_types: Allowed MIME types for *file* / *photo* steps
+                  (``"audio/*"`` matches the whole family).
+        extensions: Allowed file extensions (``".mp3"``; case-insensitive).
+        max_size: Largest accepted file, in bytes.
         next:     Branching spec (see module docstring).
         meta:     Arbitrary extra data; ignored by the engine.
         validator: Optional :data:`StepValidator` run after the built-in
@@ -88,9 +92,17 @@ class DialogStep:
     min: int | float | None = None
     max: int | float | None = None
     pattern: str | None = None
+    mime_types: list[str] = field(default_factory=list)
+    extensions: list[str] = field(default_factory=list)
+    max_size: int | None = None
     next: NextSpec = None
     meta: dict[str, Any] = field(default_factory=dict)
     validator: StepValidator | None = field(default=None, repr=False, compare=False)
+
+    @property
+    def has_file_constraints(self) -> bool:
+        """Whether the step checks file metadata, not only the count."""
+        return bool(self.mime_types or self.extensions or self.max_size is not None)
 
     # ── Construction ──────────────────────────────────────────────────────────
 
@@ -110,6 +122,9 @@ class DialogStep:
             min=data.get("min", data.get("min_photos")),
             max=data.get("max", data.get("max_photos")),
             pattern=data.get("pattern"),
+            mime_types=list(data.get("mime_types", [])),
+            extensions=list(data.get("extensions", [])),
+            max_size=data.get("max_size"),
             next=data.get("next"),
             meta=data.get("meta", {}),
         )
@@ -130,6 +145,12 @@ class DialogStep:
             d["max"] = self.max
         if self.pattern is not None:
             d["pattern"] = self.pattern
+        if self.mime_types:
+            d["mime_types"] = self.mime_types
+        if self.extensions:
+            d["extensions"] = self.extensions
+        if self.max_size is not None:
+            d["max_size"] = self.max_size
         if self.next is not None:
             d["next"] = self.next
         if self.meta:

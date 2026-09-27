@@ -172,6 +172,24 @@ What it gives you:
   (Bot API 10.3) that only the member filling it in can see; with an ephemeral
   entry command and `force_reply`, the answers stay invisible too.
 
+### File and photo steps
+
+`file` / `photo` steps can check more than the count: `mime_types`
+(`"audio/*"` matches the family), `extensions` (case-insensitive) and
+`max_size` in bytes.
+
+```json
+{"id": "mp3", "type": "file", "text": "Send the MP3",
+ "mime_types": ["audio/mpeg"], "extensions": [".mp3"], "max_size": 209715200}
+```
+
+The router passes photos, documents, audio, video, voice and animations to
+`runner.on_files()` as `FileInfo` (file_id, mime_type, file_name, file_size);
+`message_files(message)` does the same extraction for your own handlers. With
+constraints the stored answer is a list of `FileInfo` dicts; without them it
+stays a list of `file_id` strings, as before. Missing metadata counts as a
+mismatch. Each message is one answer: albums are not grouped.
+
 ### Several dialogs in one chat
 
 Each runner stores its session under `dialog_engine:<dialog_id>`, and its

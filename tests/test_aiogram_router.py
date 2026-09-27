@@ -113,7 +113,7 @@ def test_router_is_named_after_the_dialog():
 
     assert router.name == "dialog:homework"
     assert len(router.callback_query.handlers) == 1
-    assert len(router.message.handlers) == 1
+    assert len(router.message.handlers) == 2
 
 
 def test_router_accepts_an_event_sender_factory():

@@ -23,6 +23,7 @@ from aiogram.fsm.context import FSMContext
 
 from dialog_engine.engine import DialogEngine
 from dialog_engine.exceptions import DialogError, ValidationError
+from dialog_engine.files import FileInfo
 from dialog_engine.messages import DEFAULT_MESSAGES
 from dialog_engine.session import DialogSession
 from dialog_engine.step import DialogStep
@@ -34,6 +35,9 @@ from .views import DialogSender, StepView
 
 BUTTON_ONLY_TYPES = frozenset({"choice", "multi_choice", "boolean"})
 """Типы шагов, на которых текстовый ввод не принимается."""
+
+MEDIA_TYPES = frozenset({"file", "photo"})
+"""Типы шагов, ответ на которые — файл, а не текст."""
 
 NO_SESSION_ALERT = DEFAULT_MESSAGES["de.alert.no_session"]
 STALE_BUTTON_ALERT = DEFAULT_MESSAGES["de.alert.stale_button"]
@@ -147,12 +151,35 @@ class DialogRunner:
             )
 
         if step.type in BUTTON_ONLY_TYPES:
-            error = await self._text("de.error.button_required", session)
-            await self._render(session, ui, sender, error=error)
-            await self.storage.save(state, session, ui)
-            return DialogTurn()
+            return await self._reject(
+                "de.error.button_required", session, ui, state, sender
+            )
+        if step.type in MEDIA_TYPES:
+            return await self._reject(
+                f"de.error.{step.type}.expected", session, ui, state, sender
+            )
 
         return await self._submit(text, session, ui, state, sender)
+
+    async def on_files(
+        self, files: list[FileInfo], state: FSMContext, sender: DialogSender
+    ) -> DialogTurn:
+        """Обработать присланные файлы (см. :func:`.files.message_files`).
+
+        На шаге ``file`` / ``photo`` файлы уходят движку, который проверяет
+        количество и ограничения шага; на остальных шагах — ошибка.
+        """
+        session, ui = await self.storage.load(state)
+        step = await self._require_step(session, state)
+        if session is None or step is None:
+            return DialogTurn(
+                handled=False, alert=await self._text("de.alert.no_session", session)
+            )
+        if step.type not in MEDIA_TYPES:
+            return await self._reject(
+                "de.error.media.unexpected", session, ui, state, sender
+            )
+        return await self._submit(list(files), session, ui, state, sender)
 
     async def submit_value(
         self, value: Any, state: FSMContext, sender: DialogSender
@@ -169,6 +196,20 @@ class DialogRunner:
                 handled=False, alert=await self._text("de.alert.no_session", session)
             )
         return await self._submit(value, session, ui, state, sender)
+
+    async def _reject(
+        self,
+        key: str,
+        session: DialogSession,
+        ui: DialogUIState,
+        state: FSMContext,
+        sender: DialogSender,
+    ) -> DialogTurn:
+        """Показать ошибку над текущим шагом, не трогая сессию."""
+        error = await self._text(key, session)
+        await self._render(session, ui, sender, error=error)
+        await self.storage.save(state, session, ui)
+        return DialogTurn()
 
     # ── Разбор действий ───────────────────────────────────────────────────────
 
