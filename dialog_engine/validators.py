@@ -15,6 +15,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from .exceptions import DialogError, ValidationError
+from .files import FileInfo, mime_matches
 from .messages import default_text
 from .step import DialogStep, StepContext
 
@@ -110,7 +111,37 @@ def _validate_media(value: Any, step: DialogStep) -> list[Any]:
         raise _error(f"de.error.{step.type}.min", step, min=min_count)
     if len(items) > max_count:
         raise _error(f"de.error.{step.type}.max", step, max=max_count)
-    return items
+    if not step.has_file_constraints:
+        # Without constraints the answer stays what it was before: file_ids.
+        return [i.file_id if isinstance(i, FileInfo) else i for i in items]
+    # With constraints the answer is metadata, so it is stored as dicts.
+    return [_check_file(FileInfo.from_value(item), step).to_dict() for item in items]
+
+
+def _check_file(info: FileInfo, step: DialogStep) -> FileInfo:
+    if step.mime_types and not mime_matches(info.mime_type, step.mime_types):
+        raise _error("de.error.media.mime", step, allowed=", ".join(step.mime_types))
+    if step.extensions:
+        allowed = {_normalise_extension(e) for e in step.extensions}
+        if info.extension not in allowed:
+            raise _error(
+                "de.error.media.extension", step, allowed=", ".join(sorted(allowed))
+            )
+    if step.max_size is not None and (
+        info.file_size is None or info.file_size > step.max_size
+    ):
+        raise _error(
+            "de.error.media.size",
+            step,
+            max_size=step.max_size,
+            max_mb=f"{step.max_size / 1024 / 1024:g}",
+        )
+    return info
+
+
+def _normalise_extension(extension: str) -> str:
+    extension = extension.lower()
+    return extension if extension.startswith(".") else "." + extension
 
 
 # ── Registry ──────────────────────────────────────────────────────────────────

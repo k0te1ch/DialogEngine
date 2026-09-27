@@ -32,6 +32,14 @@ DEFAULT_MESSAGES: dict[str, str] = {
     "de.error.photo.max": "Можно загрузить не более {max} фото.",
     "de.error.file.min": "Необходимо загрузить минимум {min} файлов.",
     "de.error.file.max": "Можно загрузить не более {max} файлов.",
+    "de.error.media.mime": "Неподходящий тип файла. Допустимые: {allowed}.",
+    "de.error.media.extension": (
+        "Неподходящее расширение файла. Допустимые: {allowed}."
+    ),
+    "de.error.media.size": "Файл слишком большой (максимум {max_mb} МБ).",
+    "de.error.file.expected": "Отправьте файл.",
+    "de.error.photo.expected": "Отправьте фото.",
+    "de.error.media.unexpected": "Здесь нужен ответ текстом или кнопкой.",
     # Service buttons and alerts of the aiogram layer
     "de.button.back": "⬅️ Назад",
     "de.button.skip": "Пропустить",

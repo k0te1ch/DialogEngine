@@ -44,6 +44,7 @@ from .callbacks import (
     step_token,
 )
 from .ephemeral import EphemeralSender, ephemeral_in_groups
+from .files import message_files
 from .keyboards import (
     DEFAULT_LAYOUT,
     KeyboardLayout,
@@ -86,6 +87,7 @@ __all__ = [
     # storage
     "DialogUIState",
     "FSMDialogStorage",
+    "message_files",
     # views
     "DefaultSender",
     "DialogSender",

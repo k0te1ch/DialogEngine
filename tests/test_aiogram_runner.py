@@ -2,7 +2,7 @@
 
 import pytest
 
-from dialog_engine import DialogEngine, ValidationError
+from dialog_engine import DialogEngine, FileInfo, ValidationError
 
 aiogram_integration = pytest.importorskip(
     "dialog_engine.integrations.aiogram",
@@ -483,3 +483,41 @@ async def test_two_dialogs_in_one_chat(runner, state, sender):
     await runner.on_callback(homework_button, state, sender)
     session, _ui = await runner.storage.load(state)
     assert session.answers == {"subject": "math"}
+
+
+# ── Файлы ────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_on_files_checks_constraints(state, sender):
+    engine = DialogEngine.from_list(
+        [
+            {"id": "mp3", "type": "file", "text": "MP3", "mime_types": ["audio/mpeg"]},
+            {"id": "title", "type": "text", "text": "Название"},
+        ],
+        dialog_id="upload",
+    )
+    runner = DialogRunner(engine, layout=LAYOUT)
+    await runner.start(state, sender)
+
+    await runner.on_text("просто текст", state, sender)
+    assert sender.last.error == "Отправьте файл."
+
+    await runner.on_files([FileInfo("v", "video/mp4")], state, sender)
+    assert sender.last.error.startswith("Неподходящий тип файла")
+
+    await runner.on_files([FileInfo("a", "audio/mpeg", "a.mp3", 5)], state, sender)
+    assert sender.last.step.id == "title"
+
+    await runner.on_files([FileInfo("x", "audio/mpeg")], state, sender)
+    assert sender.last.error == "Здесь нужен ответ текстом или кнопкой."
+
+    turn = await runner.on_text("Выпуск", state, sender)
+    assert turn.answers["mp3"] == [
+        {
+            "file_id": "a",
+            "mime_type": "audio/mpeg",
+            "file_name": "a.mp3",
+            "file_size": 5,
+        }
+    ]

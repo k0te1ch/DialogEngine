@@ -80,6 +80,13 @@ async def test_async_resolve_error():
 
 
 def test_every_default_message_formats():
-    params = {"min": 1, "max": 2, "value": "'v'", "valid": "a, b"}
+    params = {
+        "min": 1,
+        "max": 2,
+        "value": "v",
+        "valid": "a",
+        "allowed": "a",
+        "max_mb": 1,
+    }
     for key, template in DEFAULT_MESSAGES.items():
         assert template.format(**params), key

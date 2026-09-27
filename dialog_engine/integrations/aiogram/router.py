@@ -13,13 +13,14 @@ from enum import StrEnum
 from typing import Any
 
 from aiogram import Bot, F, Router
-from aiogram.enums import ChatType
+from aiogram.enums import ChatType, ContentType
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import Filter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, TelegramObject
 
 from .callbacks import CallbackParseError, DialogCallback
+from .files import message_files
 from .runner import DialogRunner, DialogTurn
 from .storage import FSMDialogStorage
 from .views import DialogSender
@@ -32,6 +33,19 @@ EventSenderFactory = Callable[[CallbackQuery | Message], DialogSender]
 эфемерных сообщений, которым нужны получатель и ``callback_query_id``."""
 
 logger = logging.getLogger(__name__)
+
+FILE_CONTENT_TYPES = frozenset(
+    {
+        ContentType.PHOTO,
+        ContentType.DOCUMENT,
+        ContentType.AUDIO,
+        ContentType.VIDEO,
+        ContentType.VOICE,
+        ContentType.ANIMATION,
+        ContentType.VIDEO_NOTE,
+    }
+)
+"""Сообщения, которые роутер отдаёт раннеру как файлы."""
 
 
 class TextAnswerPolicy(StrEnum):
@@ -143,6 +157,14 @@ def build_dialog_router(
         turn = await runner.on_text(message.text or "", state, sender)
         if _should_delete(text_answers, message):
             await _delete_answer(message)
+        await _notify(turn, message, on_complete, on_cancel)
+
+    @router.message(
+        DialogActiveFilter(runner.storage), F.content_type.in_(FILE_CONTENT_TYPES)
+    )
+    async def _on_files(message: Message, state: FSMContext) -> None:
+        sender = make_sender(message)
+        turn = await runner.on_files(message_files(message), state, sender)
         await _notify(turn, message, on_complete, on_cancel)
 
     return router

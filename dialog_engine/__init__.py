@@ -31,6 +31,7 @@ Types:
     StepType        — Literal union of all supported step type strings
     StepContext     — what a step validator receives besides the value
     StepValidator   — signature of DialogStep.validator
+    FileInfo        — file metadata answering a file / photo step
     TextResolver    — Callable used by the engine to resolve display text
 
 Constants:
@@ -39,6 +40,7 @@ Constants:
 
 from .engine import DialogEngine, TextResolver
 from .exceptions import DialogError, StepNotFoundError, ValidationError
+from .files import FileInfo
 from .messages import DEFAULT_MESSAGES
 from .session import DialogSession, SessionStatus
 from .step import DialogStep, StepContext, StepType, StepValidator
@@ -58,6 +60,7 @@ __all__ = [
     "StepType",
     "StepContext",
     "StepValidator",
+    "FileInfo",
     # Validators
     "validate",
     "DEFAULT_MESSAGES",
