@@ -15,27 +15,29 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from .exceptions import DialogError, ValidationError
+from .messages import default_text
 from .step import DialogStep, StepContext
 
 # ── Per-type validators ───────────────────────────────────────────────────────
+
+
+def _error(key: str, step: DialogStep, **params: object) -> ValidationError:
+    """A validation error with its message key and built-in text."""
+    return ValidationError(default_text(key, params), step.id, key=key, params=params)
 
 
 def _validate_text(value: Any, step: DialogStep) -> str:
     text = str(value).strip()
     if not text:
         if step.required:
-            raise ValidationError("Это поле обязательно для заполнения.", step.id)
+            raise _error("de.error.required", step)
         return text
     if step.min is not None and len(text) < int(step.min):
-        raise ValidationError(
-            f"Слишком короткий текст (минимум {int(step.min)} символов).", step.id
-        )
+        raise _error("de.error.text.min", step, min=int(step.min))
     if step.max is not None and len(text) > int(step.max):
-        raise ValidationError(
-            f"Слишком длинный текст (максимум {int(step.max)} символов).", step.id
-        )
+        raise _error("de.error.text.max", step, max=int(step.max))
     if step.pattern is not None and not re.fullmatch(step.pattern, text):
-        raise ValidationError("Текст не соответствует ожидаемому формату.", step.id)
+        raise _error("de.error.text.pattern", step)
     return text
 
 
@@ -43,22 +45,18 @@ def _validate_number(value: Any, step: DialogStep) -> int | float:
     try:
         num = float(str(value).replace(",", "."))
     except (TypeError, ValueError):
-        raise ValidationError(
-            f"Ожидается число, получено: {value!r}.", step.id
-        ) from None
+        raise _error("de.error.number.invalid", step, value=repr(value)) from None
     if step.min is not None and num < step.min:
-        raise ValidationError(f"Число должно быть не меньше {step.min}.", step.id)
+        raise _error("de.error.number.min", step, min=step.min)
     if step.max is not None and num > step.max:
-        raise ValidationError(f"Число должно быть не больше {step.max}.", step.id)
+        raise _error("de.error.number.max", step, max=step.max)
     return int(num) if num == int(num) else num
 
 
 def _validate_email(value: Any, step: DialogStep) -> str:
     text = str(value).strip().lower()
     if not re.fullmatch(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}", text):
-        raise ValidationError(
-            f"Некорректный адрес электронной почты: {text!r}.", step.id
-        )
+        raise _error("de.error.email.invalid", step, value=repr(text))
     return text
 
 
@@ -72,18 +70,14 @@ def _validate_boolean(value: Any, step: DialogStep) -> bool:
             return True
         if value.lower() in ("0", "false", "no", "нет", "n"):
             return False
-    raise ValidationError(
-        f"Ожидается булево значение (true/false/да/нет), получено: {value!r}.", step.id
-    )
+    raise _error("de.error.boolean.invalid", step, value=repr(value))
 
 
 def _validate_choice(value: Any, step: DialogStep) -> str:
     key = str(value)
     if key not in step.choices:
         valid = ", ".join(step.choices.keys())
-        raise ValidationError(
-            f"Неверный вариант: {key!r}. Допустимые: {valid}.", step.id
-        )
+        raise _error("de.error.choice.invalid", step, value=repr(key), valid=valid)
     return key
 
 
@@ -93,42 +87,30 @@ def _validate_multi_choice(value: Any, step: DialogStep) -> list[str]:
     elif isinstance(value, (list, tuple, set)):
         items = [str(v) for v in value]
     else:
-        raise ValidationError(
-            f"Ожидается список вариантов, получено: {value!r}.", step.id
-        )
+        raise _error("de.error.multi_choice.type", step, value=repr(value))
 
     invalid = [v for v in items if v not in step.choices]
     if invalid:
         valid = ", ".join(step.choices.keys())
-        raise ValidationError(
-            f"Недопустимые варианты: {invalid}. Допустимые: {valid}.", step.id
+        raise _error(
+            "de.error.multi_choice.invalid", step, value=str(invalid), valid=valid
         )
     if step.min is not None and len(items) < int(step.min):
-        raise ValidationError(f"Выберите не менее {int(step.min)} вариантов.", step.id)
+        raise _error("de.error.multi_choice.min", step, min=int(step.min))
     if step.max is not None and len(items) > int(step.max):
-        raise ValidationError(f"Выберите не более {int(step.max)} вариантов.", step.id)
+        raise _error("de.error.multi_choice.max", step, max=int(step.max))
     return items
 
 
-def _validate_media(value: Any, step: DialogStep, label: str) -> list[Any]:
+def _validate_media(value: Any, step: DialogStep) -> list[Any]:
     items: list[Any] = value if isinstance(value, list) else [value]
     min_count = int(step.min) if step.min is not None else 1
     max_count = int(step.max) if step.max is not None else 1
     if len(items) < min_count:
-        raise ValidationError(
-            f"Необходимо загрузить минимум {min_count} {label}.", step.id
-        )
+        raise _error(f"de.error.{step.type}.min", step, min=min_count)
     if len(items) > max_count:
-        raise ValidationError(f"Можно загрузить не более {max_count} {label}.", step.id)
+        raise _error(f"de.error.{step.type}.max", step, max=max_count)
     return items
-
-
-def _validate_photo(value: Any, step: DialogStep) -> list[Any]:
-    return _validate_media(value, step, "фото")
-
-
-def _validate_file(value: Any, step: DialogStep) -> list[Any]:
-    return _validate_media(value, step, "файлов")
 
 
 # ── Registry ──────────────────────────────────────────────────────────────────
@@ -142,8 +124,8 @@ _VALIDATORS: dict[str, Any] = {
     "boolean": _validate_boolean,
     "choice": _validate_choice,
     "multi_choice": _validate_multi_choice,
-    "photo": _validate_photo,
-    "file": _validate_file,
+    "photo": _validate_media,
+    "file": _validate_media,
 }
 
 _ASYNC_VALIDATORS: dict[str, AsyncValidator] = {}
@@ -177,7 +159,7 @@ def sync_validate(step: DialogStep, value: Any, ctx: StepContext | None = None) 
     """
     if _is_empty(value):
         if step.required:
-            raise ValidationError("Это поле обязательно для заполнения.", step.id)
+            raise _error("de.error.required", step)
         return value  # optional → accept empty
 
     fn = _VALIDATORS.get(step.type)
@@ -216,7 +198,7 @@ async def async_validate(
     """
     if _is_empty(value):
         if step.required:
-            raise ValidationError("Это поле обязательно для заполнения.", step.id)
+            raise _error("de.error.required", step)
         return value  # optional → accept empty
 
     fn = _ASYNC_VALIDATORS.get(step.type)

@@ -8,7 +8,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-from .exceptions import DialogError, StepNotFoundError
+from .exceptions import DialogError, StepNotFoundError, ValidationError
 from .session import DialogSession, SessionStatus
 from .step import DialogStep, StepContext, StepValidator
 from .validators import async_validate as _async_validate
@@ -54,6 +54,20 @@ def _takes_context(fn: Callable[..., Any]) -> bool:
         ):
             positional += 1
     return positional >= 3
+
+
+def _finish_translation(
+    key: str, raw: str, default: str | None, params: dict[str, Any] | None
+) -> str:
+    if raw == key:
+        return default if default is not None else key
+    if not params:
+        return raw
+    try:
+        return raw.format_map(params)
+    except (KeyError, IndexError, ValueError):
+        # A translation with a broken placeholder is still better than none.
+        return raw
 
 
 # ── Engine ────────────────────────────────────────────────────────────────────
@@ -374,7 +388,7 @@ class DialogEngine:
             raise DialogError(
                 "Async text resolver requires calling async_resolve_text() instead"
             )
-        return self.text_resolver(*self._resolver_args(step, session))
+        return self.text_resolver(*self._resolver_args(step.text, session))
 
     async def async_resolve_text(
         self,
@@ -387,7 +401,63 @@ class DialogEngine:
         """
         if not self._is_async_resolver:
             return self.resolve_text(step, session)
-        return await self.text_resolver(*self._resolver_args(step, session))
+        return await self.text_resolver(*self._resolver_args(step.text, session))
+
+    def translate(
+        self,
+        key: str,
+        session: DialogSession | None = None,
+        *,
+        default: str | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> str:
+        """Translate a message *key* (error, button label) via the resolver.
+
+        If the resolver returns *key* unchanged (or raises ``LookupError``),
+        the key is unknown to it and *default* is returned as is — or *key*
+        itself when there is no default.  A translated text gets *params*
+        filled into its ``{placeholders}``.
+        """
+        if self._is_async_resolver:
+            raise DialogError(
+                "Async text resolver requires calling async_translate() instead"
+            )
+        try:
+            raw = self.text_resolver(*self._resolver_args(key, session))
+        except LookupError:
+            raw = key
+        return _finish_translation(key, raw, default, params)
+
+    async def async_translate(
+        self,
+        key: str,
+        session: DialogSession | None = None,
+        *,
+        default: str | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> str:
+        """Async version of :meth:`translate`."""
+        if not self._is_async_resolver:
+            return self.translate(key, session, default=default, params=params)
+        try:
+            raw = await self.text_resolver(*self._resolver_args(key, session))
+        except LookupError:
+            raw = key
+        return _finish_translation(key, raw, default, params)
+
+    def resolve_error(
+        self, exc: ValidationError, session: DialogSession | None = None
+    ) -> str:
+        """Display text of a validation error, translated when possible."""
+        return self.translate(exc.key, session, default=str(exc), params=exc.params)
+
+    async def async_resolve_error(
+        self, exc: ValidationError, session: DialogSession | None = None
+    ) -> str:
+        """Async version of :meth:`resolve_error`."""
+        return await self.async_translate(
+            exc.key, session, default=str(exc), params=exc.params
+        )
 
     def get_step(self, index: int) -> DialogStep | None:
         """Return the step at *index*, or ``None`` if out of range."""
@@ -439,13 +509,13 @@ class DialogEngine:
         return StepContext(step=step, answers=session.answers, context=session.context)
 
     def _resolver_args(
-        self, step: DialogStep, session: DialogSession | None
+        self, key: str, session: DialogSession | None
     ) -> tuple[Any, ...]:
         answers = session.answers if session is not None else {}
         if not self._resolver_takes_context:
-            return step.text, answers
+            return key, answers
         context = session.context if session is not None else {}
-        return step.text, answers, context
+        return key, answers, context
 
     def _require_current(self, session: DialogSession) -> DialogStep:
         step = self.current_step(session)
