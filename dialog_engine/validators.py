@@ -157,6 +157,7 @@ _VALIDATORS: dict[str, Any] = {
     "multi_choice": _validate_multi_choice,
     "photo": _validate_media,
     "file": _validate_media,
+    "confirm": _validate_boolean,
 }
 
 _ASYNC_VALIDATORS: dict[str, AsyncValidator] = {}

@@ -44,6 +44,8 @@ class KeyboardLayout:
     skip_text: str = "Пропустить"
     cancel_text: str = "Отмена"
     done_text: str = "Готово"
+    confirm_text: str = "✅ Подтвердить"
+    """Кнопка подтверждения на шаге ``confirm``."""
     selected_mark: str = "✅ "
     """Префикс выбранного варианта на шаге ``multi_choice``."""
 
@@ -174,12 +176,13 @@ def render_keyboard(
     if total_pages > 1:
         rows.append(_pagination_row(step, current, total_pages, layout, build))
 
-    if step.type == "multi_choice":
+    if step.type in ("multi_choice", "confirm"):
+        # На шаге confirm варианты — кнопки правки, а DONE — подтверждение.
+        text = layout.done_text if step.type == "multi_choice" else layout.confirm_text
         rows.append(
             [
                 InlineKeyboardButton(
-                    text=layout.done_text,
-                    callback_data=build(DialogAction.DONE, step),
+                    text=text, callback_data=build(DialogAction.DONE, step)
                 )
             ]
         )

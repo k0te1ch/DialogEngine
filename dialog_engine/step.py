@@ -17,6 +17,7 @@ StepType = Literal[
     "multi_choice",
     "photo",
     "file",
+    "confirm",
 ]
 
 # ── Branching type ────────────────────────────────────────────────────────────
@@ -65,6 +66,7 @@ class DialogStep:
         text:     Display text or i18n key passed to the text resolver.
         required: Whether the step must be answered (cannot be skipped).
         choices:  Mapping of key → display text for *choice* / *multi_choice* steps.
+                  For a *confirm* step: step ID → label of its "edit" button.
         min:      Lower bound.  Meaning depends on type:
                   text → min character length
                   number → min numeric value

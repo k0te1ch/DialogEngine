@@ -46,6 +46,7 @@ DEFAULT_MESSAGES: dict[str, str] = {
     "de.button.cancel": "Отмена",
     "de.button.done": "Готово",
     "de.button.keep": "Оставить как есть",
+    "de.button.confirm": "✅ Подтвердить",
     "de.button.keep_value": "Оставить: {value}",
     "de.button.yes": "Да",
     "de.button.no": "Нет",

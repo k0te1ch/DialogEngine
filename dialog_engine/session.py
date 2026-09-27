@@ -30,6 +30,8 @@ class DialogSession:
         drafts:    Answers taken back by ``back()`` / ``jump_to()``, keyed by
                    step ID.  Not answers any more — a hint to offer the user
                    the previous value (see :meth:`DialogEngine.keep`).
+        return_to: Step to come back to after an edit started with
+                   ``jump_to(..., return_to=...)``; ``None`` otherwise.
 
     Internal:
         _history:  Stack of visited step indices.  ``_history[-1]`` is always
@@ -42,6 +44,7 @@ class DialogSession:
     context: dict[str, Any] = field(default_factory=dict)
     dialog_version: str | int | None = None
     drafts: dict[str, Any] = field(default_factory=dict)
+    return_to: str | None = None
     _history: list[int] = field(default_factory=list, repr=False)
 
     # ── Properties ────────────────────────────────────────────────────────────
@@ -68,6 +71,7 @@ class DialogSession:
             "context": self.context,
             "dialog_version": self.dialog_version,
             "drafts": self.drafts,
+            "return_to": self.return_to,
         }
 
     @classmethod
@@ -81,6 +85,7 @@ class DialogSession:
             context=dict(data.get("context") or {}),
             dialog_version=data.get("dialog_version"),
             drafts=dict(data.get("drafts") or {}),
+            return_to=data.get("return_to"),
         )
         session._history = list(data.get("history", []))
         return session
