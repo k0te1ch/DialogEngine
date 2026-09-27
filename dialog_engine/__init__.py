@@ -52,7 +52,7 @@ from .session import DialogSession, SessionStatus
 from .step import DialogStep, StepContext, StepType, StepValidator
 from .validators import validate
 
-__version__ = "0.2.0"  # x-release-please-version
+__version__ = "0.3.0"  # x-release-please-version
 
 __all__ = [
     # Engine
