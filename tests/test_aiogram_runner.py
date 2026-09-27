@@ -566,3 +566,41 @@ async def test_keep_button_without_draft_is_stale(runner, engine, state, sender)
         payload(engine, "subject", DialogAction.KEEP), state, sender
     )
     assert turn.alert == aiogram_integration.runner.STALE_BUTTON_ALERT
+
+
+# ── Шаг подтверждения ────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_confirm_step_edit_and_confirm(state, sender):
+    engine = DialogEngine.from_list(
+        [
+            {"id": "title", "type": "text", "text": "Название"},
+            {
+                "id": "confirm",
+                "type": "confirm",
+                "text": "Переслать «{title}»?",
+                "choices": {"title": "✏️ Название"},
+            },
+        ],
+        dialog_id="forward",
+    )
+    runner = DialogRunner(engine, layout=LAYOUT)
+    await runner.start(state, sender)
+    await runner.on_text("Выпуск 1", state, sender)
+
+    assert sender.last.text == "Переслать «Выпуск 1»?"
+    buttons = dict(_buttons(sender.last))
+    assert "✏️ Название" in buttons and "✅ Подтвердить" in buttons
+
+    await runner.on_text("да", state, sender)
+    assert sender.last.error == "Выберите вариант с помощью кнопок."
+
+    await runner.on_callback(buttons["✏️ Название"], state, sender)
+    assert sender.last.step.id == "title"
+    await runner.on_text("Выпуск 2", state, sender)
+    assert sender.last.text == "Переслать «Выпуск 2»?"
+
+    turn = await runner.on_callback(buttons["✅ Подтвердить"], state, sender)
+    assert turn.finished
+    assert turn.answers == {"title": "Выпуск 2", "confirm": True}

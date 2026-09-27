@@ -70,6 +70,19 @@ def _finish_translation(
         return raw
 
 
+class _SummaryAnswers(dict):
+    """Answers for ``str.format_map`` that keep unknown placeholders intact."""
+
+    def __missing__(self, key: str) -> str:
+        return "{" + key + "}"
+
+    def __getitem__(self, key: str) -> Any:
+        value = super().__getitem__(key) if key in self else self.__missing__(key)
+        if isinstance(value, list):
+            return ", ".join(str(v) for v in value)
+        return "—" if value is None else value
+
+
 # ── Engine ────────────────────────────────────────────────────────────────────
 
 
@@ -334,6 +347,7 @@ class DialogEngine:
 
         # Drop the current (unanswered) step.
         session._history.pop()
+        session.return_to = None
         # The step we're returning to will be re-answered: its answer becomes
         # a draft the user can keep.
         prev_step = self.steps[session._history[-1]]
@@ -352,22 +366,33 @@ class DialogEngine:
 
         # Drop the current (unanswered) step.
         session._history.pop()
+        session.return_to = None
         # The step we're returning to will be re-answered: its answer becomes
         # a draft the user can keep.
         prev_step = self.steps[session._history[-1]]
         self._to_draft(session, prev_step.id)
         return prev_step
 
-    def jump_to(self, session: DialogSession, step_id: str) -> DialogStep:
+    def jump_to(
+        self, session: DialogSession, step_id: str, *, return_to: str | None = None
+    ) -> DialogStep:
         """Jump directly to the step with the given *step_id*.
 
         Useful for edit flows where the user wants to revisit a specific step.
         The step's answer moves to ``session.drafts``, as with :meth:`back`.
+
+        With *return_to* (typically a ``confirm`` step), after the edited step
+        is answered the dialog follows its route through steps that already
+        have answers and stops at *return_to* — or earlier, at the first step
+        without an answer (say, a new branch opened by the edit).
         """
         self._assert_active(session)
         idx = self._by_id.get(step_id)
         if idx is None:
             raise StepNotFoundError(step_id)
+        if return_to is not None:
+            self._lookup(return_to)
+        session.return_to = return_to
         session._history.append(idx)
         self._to_draft(session, step_id)
         return self.steps[idx]
@@ -413,7 +438,8 @@ class DialogEngine:
             raise DialogError(
                 "Async text resolver requires calling async_resolve_text() instead"
             )
-        return self.text_resolver(*self._resolver_args(step.text, session))
+        text = self.text_resolver(*self._resolver_args(step.text, session))
+        return self._fill_summary(step, text, session)
 
     async def async_resolve_text(
         self,
@@ -426,7 +452,8 @@ class DialogEngine:
         """
         if not self._is_async_resolver:
             return self.resolve_text(step, session)
-        return await self.text_resolver(*self._resolver_args(step.text, session))
+        text = await self.text_resolver(*self._resolver_args(step.text, session))
+        return self._fill_summary(step, text, session)
 
     def translate(
         self,
@@ -527,18 +554,54 @@ class DialogEngine:
         if not session.is_active:
             raise DialogError(f"Session is {session.status.value}, not in-progress.")
 
+    @staticmethod
+    def _fill_summary(
+        step: DialogStep, text: str, session: DialogSession | None
+    ) -> str:
+        """Fill ``{step_id}`` placeholders of a ``confirm`` step with answers.
+
+        Unknown placeholders are left as they are, so a stray brace in the
+        text never breaks the summary.
+        """
+        if step.type != "confirm" or session is None:
+            return text
+        answers = _SummaryAnswers(session.answers)
+        try:
+            return text.format_map(answers)
+        except (IndexError, ValueError, AttributeError):
+            return text
+
     def _store_and_advance(
         self, session: DialogSession, step: DialogStep, value: Any
     ) -> DialogStep | None:
         session.answers[step.id] = value
         session.drafts.pop(step.id, None)
         next_idx = self._resolve_next_index(step, value, session.current_index)
+        if session.return_to is not None:
+            next_idx = self._fast_forward(session, next_idx)
         if next_idx is None:
             session.status = SessionStatus.COMPLETED
             session.drafts.clear()
+            session.return_to = None
             return None
         session._history.append(next_idx)
         return self.steps[next_idx]
+
+    def _fast_forward(self, session: DialogSession, idx: int | None) -> int | None:
+        """Follow the route through answered steps towards ``session.return_to``."""
+        seen: set[int] = set()
+        while idx is not None and idx not in seen:
+            step = self.steps[idx]
+            if step.id == session.return_to:
+                session.return_to = None
+                return idx
+            if step.id not in session.answers:
+                return idx
+            seen.add(idx)
+            idx = self._resolve_next_index(step, session.answers[step.id], idx)
+        # The route ended (or looped) before reaching the target.
+        session.return_to = None
+        return idx
 
     def _to_draft(self, session: DialogSession, step_id: str) -> None:
         if step_id in session.answers:

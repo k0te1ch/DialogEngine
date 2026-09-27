@@ -109,6 +109,26 @@ The aiogram runner marks the previous choice on the keyboard and adds a
 "keep" button (`de.button.keep`, or `de.button.keep_value` with the old text
 for text, number and email steps).
 
+## Confirmation step
+
+A `confirm` step shows a summary and waits for confirmation. Its text is
+formatted with the answers (`{step_id}`; lists are joined, unknown
+placeholders stay as they are). `choices` map step IDs to "edit" buttons.
+
+```json
+{"id": "confirm", "type": "confirm",
+ "text": "Forward \"{title}\" to the channel?",
+ "choices": {"title": "Edit title"}}
+```
+
+Editing uses `jump_to(session, step_id, return_to="confirm")`: after the edited
+step is answered, the dialog follows its route through steps that already
+have answers and stops at the summary, or earlier at a step the edit left
+unanswered (a new branch). The answer of a confirm step is `True`; with an
+empty `choices` it is a plain "are you sure?" step. In aiogram, the runner
+draws the edit buttons and a confirm button (`de.button.confirm`). Telegram
+limits a message to 4096 characters, so keep summaries short.
+
 ## Translating errors and labels
 
 Every built-in validation error has a message key (`ValidationError.key`) and
@@ -142,7 +162,7 @@ A custom validator can raise `ValidationError("my.key")` or pass
 | `de.error.photo.min` / `.max`, `de.error.file.min` / `.max` | `min` / `max` |
 | `de.error.media.mime` / `.extension` / `.size` | `allowed` / `allowed` / `max_mb`, `max_size` |
 | `de.error.file.expected`, `de.error.photo.expected`, `de.error.media.unexpected` | — |
-| `de.button.back` / `.skip` / `.cancel` / `.done` / `.yes` / `.no` / `.keep` | — |
+| `de.button.back` / `.skip` / `.cancel` / `.done` / `.yes` / `.no` / `.keep` / `.confirm` | — |
 | `de.button.keep_value` | `value` |
 | `de.error.button_required`, `de.alert.no_session`, `de.alert.stale_button` | — |
 

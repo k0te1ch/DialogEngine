@@ -30,7 +30,7 @@ from .keyboards import DEFAULT_LAYOUT, KeyboardLayout, render_keyboard, step_opt
 from .storage import DialogUIState, FSMDialogStorage
 from .views import DialogSender, StepView
 
-BUTTON_ONLY_TYPES = frozenset({"choice", "multi_choice", "boolean"})
+BUTTON_ONLY_TYPES = frozenset({"choice", "multi_choice", "boolean", "confirm"})
 """Типы шагов, на которых текстовый ввод не принимается."""
 
 KEEP_VALUE_LIMIT = 40
@@ -234,7 +234,8 @@ class DialogRunner:
                 return await self._pick(callback.arg, step, session, ui, state, sender)
 
             case DialogAction.DONE:
-                return await self._submit(list(ui.selected), session, ui, state, sender)
+                value = True if step.type == "confirm" else list(ui.selected)
+                return await self._submit(value, session, ui, state, sender)
 
             case DialogAction.SKIP:
                 return await self._navigate(
@@ -277,6 +278,15 @@ class DialogRunner:
             return DialogTurn(alert=await self._text("de.alert.stale_button", session))
         key = options[index].key
 
+        if step.type == "confirm":
+            # Кнопка «Изменить …»: правим шаг и возвращаемся к сводке.
+            return await self._navigate(
+                lambda: self.engine.jump_to(session, key, return_to=step.id),
+                session,
+                ui,
+                state,
+                sender,
+            )
         if step.type != "multi_choice":
             return await self._submit(key, session, ui, state, sender)
 
@@ -448,6 +458,7 @@ class DialogRunner:
             skip_text=await label("de.button.skip", layout.skip_text),
             cancel_text=await label("de.button.cancel", layout.cancel_text),
             done_text=await label("de.button.done", layout.done_text),
+            confirm_text=await label("de.button.confirm", layout.confirm_text),
             boolean_labels=(
                 await label("de.button.yes", layout.boolean_labels[0]),
                 await label("de.button.no", layout.boolean_labels[1]),
