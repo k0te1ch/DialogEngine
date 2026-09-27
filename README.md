@@ -96,6 +96,19 @@ With aiogram, pass the context to `runner.start(state, sender, context=...)`;
 the final `DialogTurn.context` returns it. The old process-wide
 `_ASYNC_VALIDATORS` registry still works but is deprecated.
 
+## Going back without losing the answer
+
+`back()` and `jump_to()` take the step's answer out of `session.answers` and
+keep it in `session.drafts`. `engine.draft(session)` returns it and
+`engine.keep(session)` (or `async_keep`) submits it again, through validation
+and branching, so a kept answer follows its old route and a changed one takes
+the new route. Drafts are saved with the session and cleared when it
+completes.
+
+The aiogram runner marks the previous choice on the keyboard and adds a
+"keep" button (`de.button.keep`, or `de.button.keep_value` with the old text
+for text, number and email steps).
+
 ## Translating errors and labels
 
 Every built-in validation error has a message key (`ValidationError.key`) and
@@ -127,7 +140,10 @@ A custom validator can raise `ValidationError("my.key")` or pass
 | `de.error.choice.invalid` | `value`, `valid` |
 | `de.error.multi_choice.type` / `.invalid` / `.min` / `.max` | `value` / `value`, `valid` / `min` / `max` |
 | `de.error.photo.min` / `.max`, `de.error.file.min` / `.max` | `min` / `max` |
-| `de.button.back` / `.skip` / `.cancel` / `.done` / `.yes` / `.no` | — |
+| `de.error.media.mime` / `.extension` / `.size` | `allowed` / `allowed` / `max_mb`, `max_size` |
+| `de.error.file.expected`, `de.error.photo.expected`, `de.error.media.unexpected` | — |
+| `de.button.back` / `.skip` / `.cancel` / `.done` / `.yes` / `.no` / `.keep` | — |
+| `de.button.keep_value` | `value` |
 | `de.error.button_required`, `de.alert.no_session`, `de.alert.stale_button` | — |
 
 A resolver that does not know a `de.button.*` key keeps the text from

@@ -4,13 +4,10 @@
 объекты aiogram. Так логика шага проверяется тестами без бота и без сети, а
 разбор апдейтов остаётся тонкой прослойкой в :mod:`.router`.
 
-Про «Назад»: :meth:`~dialog_engine.DialogEngine.back` и
-:meth:`~dialog_engine.DialogEngine.jump_to` **стирают** ответ того шага, на
-который возвращаются (``session.answers.pop(...)``). Для интерфейса это
-неочевидно — пользователь ждёт увидеть свой прежний выбор отмеченным, а его
-уже нет. Здесь поведение движка не переопределяется, но о нём стоит помнить:
-если нужен возврат с сохранением ответа, потребителю придётся запомнить
-значение до вызова и подставить его самому.
+Про «Назад»: :meth:`~dialog_engine.DialogEngine.back` переносит ответ шага,
+на который вернулись, в черновики сессии. Раннер отмечает прежний выбор на
+клавиатуре и добавляет кнопку «Оставить», которая отправляет черновик заново
+через :meth:`~dialog_engine.DialogEngine.async_keep`.
 """
 
 from __future__ import annotations
@@ -35,6 +32,9 @@ from .views import DialogSender, StepView
 
 BUTTON_ONLY_TYPES = frozenset({"choice", "multi_choice", "boolean"})
 """Типы шагов, на которых текстовый ввод не принимается."""
+
+KEEP_VALUE_LIMIT = 40
+"""Сколько символов прежнего ответа показывать на кнопке «Оставить»."""
 
 MEDIA_TYPES = frozenset({"file", "photo"})
 """Типы шагов, ответ на которые — файл, а не текст."""
@@ -246,6 +246,15 @@ class DialogRunner:
                     lambda: self.engine.back(session), session, ui, state, sender
                 )
 
+            case DialogAction.KEEP:
+                if step.id not in session.drafts:
+                    return DialogTurn(
+                        alert=await self._text("de.alert.stale_button", session)
+                    )
+                return await self._submit(
+                    session.drafts[step.id], session, ui, state, sender
+                )
+
             case DialogAction.CANCEL:
                 self.engine.cancel(session)
                 await self.storage.clear(state)
@@ -324,6 +333,12 @@ class DialogRunner:
     ) -> DialogTurn:
         """Общий хвост перехода: либо рисуем новый шаг, либо завершаем анкету."""
         ui.reset_step()
+        step = self.engine.current_step(session)
+        if step is not None and step.type == "multi_choice":
+            # Вернулись к набору вариантов — прежние отметки на месте.
+            draft = session.drafts.get(step.id)
+            if isinstance(draft, list):
+                ui.selected = [str(k) for k in draft]
         if self.engine.current_step(session) is None:
             answers = dict(session.answers)
             context = dict(session.context)
@@ -355,15 +370,19 @@ class DialogRunner:
         if step is None:
             return None
         position, total = self.engine.progress(session)
+        selected = ui.selected
+        if step.type in ("choice", "boolean") and step.id in session.drafts:
+            selected = [str(session.drafts[step.id]).lower()]
         return StepView(
             text=await self.engine.async_resolve_text(step, session),
             keyboard=render_keyboard(
                 await self._translated_step(step, session),
                 page=ui.page,
-                selected=ui.selected,
+                selected=selected,
                 can_go_back=position > 1,
                 layout=await self._translated_layout(session),
                 dialog_id=self.engine.dialog_id,
+                keep_text=await self._keep_text(step, session),
             ),
             step=step,
             error=error,
@@ -374,6 +393,27 @@ class DialogRunner:
         return await self.engine.async_translate(
             key, session, default=DEFAULT_MESSAGES[key]
         )
+
+    async def _keep_text(self, step: DialogStep, session: DialogSession) -> str | None:
+        """Подпись кнопки «Оставить»; ``None``, если оставлять нечего.
+
+        Для текстовых шагов в подписи виден сам прежний ответ — на кнопках
+        вариантов он и так отмечен.
+        """
+        if step.id not in session.drafts:
+            return None
+        draft = session.drafts[step.id]
+        if step.type in ("text", "number", "email") and draft is not None:
+            value = str(draft)
+            if len(value) > KEEP_VALUE_LIMIT:
+                value = value[: KEEP_VALUE_LIMIT - 1] + "…"
+            return await self.engine.async_translate(
+                "de.button.keep_value",
+                session,
+                default=DEFAULT_MESSAGES["de.button.keep_value"].format(value=value),
+                params={"value": value},
+            )
+        return await self._text("de.button.keep", session)
 
     async def _translated_step(
         self, step: DialogStep, session: DialogSession

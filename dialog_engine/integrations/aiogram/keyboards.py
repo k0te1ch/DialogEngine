@@ -133,6 +133,7 @@ def render_keyboard(
     can_go_back: bool = False,
     layout: KeyboardLayout = DEFAULT_LAYOUT,
     dialog_id: str | None = None,
+    keep_text: str | None = None,
 ) -> InlineKeyboardMarkup:
     """Собрать клавиатуру шага.
 
@@ -145,6 +146,8 @@ def render_keyboard(
             клавиатура не видит историю сессии.
         layout: параметры отрисовки.
         dialog_id: анкета, к которой привязать кнопки (см. :mod:`.callbacks`).
+        keep_text: подпись кнопки «оставить прежний ответ»; ``None`` — кнопки
+            нет. Решает вызывающий: клавиатура не видит черновиков сессии.
     """
     build = partial(build_payload, dialog_id=dialog_id)
     options = step_options(step, layout)
@@ -177,6 +180,15 @@ def render_keyboard(
                 InlineKeyboardButton(
                     text=layout.done_text,
                     callback_data=build(DialogAction.DONE, step),
+                )
+            ]
+        )
+
+    if keep_text is not None:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=keep_text, callback_data=build(DialogAction.KEEP, step)
                 )
             ]
         )

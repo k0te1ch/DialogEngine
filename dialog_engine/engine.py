@@ -262,15 +262,7 @@ class DialogEngine:
         step = self._require_current(session)
 
         cleaned = _validate(step, value, self._step_context(step, session))
-        session.answers[step.id] = cleaned
-
-        next_idx = self._resolve_next_index(step, cleaned, session.current_index)
-        if next_idx is None:
-            session.status = SessionStatus.COMPLETED
-            return None
-
-        session._history.append(next_idx)
-        return self.steps[next_idx]
+        return self._store_and_advance(session, step, cleaned)
 
     async def async_submit(
         self, session: DialogSession, value: Any
@@ -292,15 +284,7 @@ class DialogEngine:
         step = self._require_current(session)
 
         cleaned = await _async_validate(step, value, self._step_context(step, session))
-        session.answers[step.id] = cleaned
-
-        next_idx = self._resolve_next_index(step, cleaned, session.current_index)
-        if next_idx is None:
-            session.status = SessionStatus.COMPLETED
-            return None
-
-        session._history.append(next_idx)
-        return self.steps[next_idx]
+        return self._store_and_advance(session, step, cleaned)
 
     def skip(self, session: DialogSession) -> DialogStep | None:
         """Skip the current *optional* step (``required=False``).
@@ -316,14 +300,7 @@ class DialogEngine:
         if step.required:
             raise DialogError(f"Step {step.id!r} is required and cannot be skipped.")
 
-        session.answers[step.id] = None
-        next_idx = self._resolve_next_index(step, None, session.current_index)
-        if next_idx is None:
-            session.status = SessionStatus.COMPLETED
-            return None
-
-        session._history.append(next_idx)
-        return self.steps[next_idx]
+        return self._store_and_advance(session, step, None)
 
     async def async_skip(self, session: DialogSession) -> DialogStep | None:
         """Skip the current *optional* step (``required=False``) asynchronously.
@@ -339,17 +316,14 @@ class DialogEngine:
         if step.required:
             raise DialogError(f"Step {step.id!r} is required and cannot be skipped.")
 
-        session.answers[step.id] = None
-        next_idx = self._resolve_next_index(step, None, session.current_index)
-        if next_idx is None:
-            session.status = SessionStatus.COMPLETED
-            return None
-
-        session._history.append(next_idx)
-        return self.steps[next_idx]
+        return self._store_and_advance(session, step, None)
 
     def back(self, session: DialogSession) -> DialogStep:
-        """Go back to the previous step and clear its stored answer.
+        """Go back to the previous step.
+
+        Its answer moves from ``session.answers`` to ``session.drafts``: the
+        step has to be answered again, but :meth:`keep` can resubmit the
+        previous value.
 
         Raises:
             :class:`~dialog_engine.DialogError` if already on the first step.
@@ -360,13 +334,14 @@ class DialogEngine:
 
         # Drop the current (unanswered) step.
         session._history.pop()
-        # The step we're returning to will be re-answered, so clear its value.
+        # The step we're returning to will be re-answered: its answer becomes
+        # a draft the user can keep.
         prev_step = self.steps[session._history[-1]]
-        session.answers.pop(prev_step.id, None)
+        self._to_draft(session, prev_step.id)
         return prev_step
 
     async def async_back(self, session: DialogSession) -> DialogStep:
-        """Go back to the previous step and clear its stored answer asynchronously.
+        """Async version of :meth:`back`.
 
         Raises:
             :class:`~dialog_engine.DialogError` if already on the first step.
@@ -377,24 +352,45 @@ class DialogEngine:
 
         # Drop the current (unanswered) step.
         session._history.pop()
-        # The step we're returning to will be re-answered, so clear its value.
+        # The step we're returning to will be re-answered: its answer becomes
+        # a draft the user can keep.
         prev_step = self.steps[session._history[-1]]
-        session.answers.pop(prev_step.id, None)
+        self._to_draft(session, prev_step.id)
         return prev_step
 
     def jump_to(self, session: DialogSession, step_id: str) -> DialogStep:
         """Jump directly to the step with the given *step_id*.
 
         Useful for edit flows where the user wants to revisit a specific step.
-        The step's previous answer is cleared so it can be re-submitted.
+        The step's answer moves to ``session.drafts``, as with :meth:`back`.
         """
         self._assert_active(session)
         idx = self._by_id.get(step_id)
         if idx is None:
             raise StepNotFoundError(step_id)
         session._history.append(idx)
-        session.answers.pop(step_id, None)
+        self._to_draft(session, step_id)
         return self.steps[idx]
+
+    def draft(self, session: DialogSession) -> Any:
+        """Previous answer of the current step, if it was taken back; else ``None``."""
+        step = self.current_step(session)
+        return session.drafts.get(step.id) if step is not None else None
+
+    def keep(self, session: DialogSession) -> DialogStep | None:
+        """Resubmit the draft of the current step (the answer given before).
+
+        It goes through validation and branching again, so the route after
+        the step follows the kept value.
+
+        Raises:
+            :class:`~dialog_engine.DialogError` if the step has no draft.
+        """
+        return self.submit(session, self._require_draft(session))
+
+    async def async_keep(self, session: DialogSession) -> DialogStep | None:
+        """Async version of :meth:`keep`."""
+        return await self.async_submit(session, self._require_draft(session))
 
     def cancel(self, session: DialogSession) -> None:
         """Mark the session as cancelled."""
@@ -530,6 +526,30 @@ class DialogEngine:
     def _assert_active(self, session: DialogSession) -> None:
         if not session.is_active:
             raise DialogError(f"Session is {session.status.value}, not in-progress.")
+
+    def _store_and_advance(
+        self, session: DialogSession, step: DialogStep, value: Any
+    ) -> DialogStep | None:
+        session.answers[step.id] = value
+        session.drafts.pop(step.id, None)
+        next_idx = self._resolve_next_index(step, value, session.current_index)
+        if next_idx is None:
+            session.status = SessionStatus.COMPLETED
+            session.drafts.clear()
+            return None
+        session._history.append(next_idx)
+        return self.steps[next_idx]
+
+    def _to_draft(self, session: DialogSession, step_id: str) -> None:
+        if step_id in session.answers:
+            session.drafts[step_id] = session.answers.pop(step_id)
+
+    def _require_draft(self, session: DialogSession) -> Any:
+        self._assert_active(session)
+        step = self._require_current(session)
+        if step.id not in session.drafts:
+            raise DialogError(f"Step {step.id!r} has no previous answer to keep.")
+        return session.drafts[step.id]
 
     def _attach_validators(self, validators: dict[str, StepValidator] | None) -> None:
         for step_id, fn in (validators or {}).items():

@@ -27,6 +27,9 @@ class DialogSession:
                    step validators).  Must be JSON-serialisable: it is stored
                    together with the session.
         dialog_version: Schema version of the engine that created the session.
+        drafts:    Answers taken back by ``back()`` / ``jump_to()``, keyed by
+                   step ID.  Not answers any more — a hint to offer the user
+                   the previous value (see :meth:`DialogEngine.keep`).
 
     Internal:
         _history:  Stack of visited step indices.  ``_history[-1]`` is always
@@ -38,6 +41,7 @@ class DialogSession:
     status: SessionStatus = SessionStatus.IN_PROGRESS
     context: dict[str, Any] = field(default_factory=dict)
     dialog_version: str | int | None = None
+    drafts: dict[str, Any] = field(default_factory=dict)
     _history: list[int] = field(default_factory=list, repr=False)
 
     # ── Properties ────────────────────────────────────────────────────────────
@@ -63,6 +67,7 @@ class DialogSession:
             "status": self.status.value,
             "context": self.context,
             "dialog_version": self.dialog_version,
+            "drafts": self.drafts,
         }
 
     @classmethod
@@ -75,6 +80,7 @@ class DialogSession:
             # Sessions saved before 0.3 have no context.
             context=dict(data.get("context") or {}),
             dialog_version=data.get("dialog_version"),
+            drafts=dict(data.get("drafts") or {}),
         )
         session._history = list(data.get("history", []))
         return session
