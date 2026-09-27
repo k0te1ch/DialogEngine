@@ -2,7 +2,7 @@
 
 import pytest
 
-from dialog_engine import DialogEngine
+from dialog_engine import DialogEngine, ValidationError
 
 aiogram_integration = pytest.importorskip(
     "dialog_engine.integrations.aiogram",
@@ -366,3 +366,34 @@ async def test_submit_value_answers_a_media_step(state, sender):
     turn = await runner.submit_value(["file_id_1"], state, sender)
 
     assert turn.answers == {"photos": ["file_id_1"]}
+
+
+# ── Контекст и валидатор шага ────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_start_with_context_and_step_validator_error(state, sender):
+    def check(value, ctx):
+        if value != ctx.context["expected"]:
+            raise ValidationError("wrong", ctx.step.id)
+        ctx.context["checked"] = True
+
+    engine = DialogEngine.from_list(
+        STEPS,
+        dialog_id="homework",
+        validators={"task": check},
+        text_resolver=lambda key, answers, context: f"[{context['lang']}] {key}",
+    )
+    runner = DialogRunner(engine, layout=LAYOUT)
+    await runner.start(state, sender, context={"lang": "en", "expected": "abcd"})
+    assert sender.last.text == "[en] Выберите предмет"
+
+    await runner.submit_value("math", state, sender)
+    await runner.on_text("wxyz", state, sender)
+    assert sender.last.error == "wrong"
+    assert sender.last.step.id == "task"
+
+    await runner.on_text("abcd", state, sender)
+    turn = await runner.submit_value("today", state, sender)
+    assert turn.finished
+    assert turn.context == {"lang": "en", "expected": "abcd", "checked": True}

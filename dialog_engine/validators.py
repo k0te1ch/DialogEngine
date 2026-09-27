@@ -8,13 +8,14 @@ Each validator:
 
 from __future__ import annotations
 
-import asyncio
+import inspect
 import re
+import warnings
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from .exceptions import ValidationError
-from .step import DialogStep
+from .exceptions import DialogError, ValidationError
+from .step import DialogStep, StepContext
 
 # ── Per-type validators ───────────────────────────────────────────────────────
 
@@ -146,55 +147,97 @@ _VALIDATORS: dict[str, Any] = {
 }
 
 _ASYNC_VALIDATORS: dict[str, AsyncValidator] = {}
+"""Deprecated process-wide registry of async validators by step type.
+
+Use :attr:`DialogStep.validator` instead.  Order of checks in
+:func:`async_validate`: built-in type check (replaced by this registry when it
+has an entry for the type) → the step's own validator.
+"""
 
 
-def sync_validate(step: DialogStep, value: Any) -> Any:
+def _is_empty(value: Any) -> bool:
+    return value is None or (isinstance(value, str) and not value.strip())
+
+
+def _context_for(step: DialogStep, ctx: StepContext | None) -> StepContext:
+    return ctx if ctx is not None else StepContext(step=step, answers={}, context={})
+
+
+def _keep_or_replace(value: Any, result: Any) -> Any:
+    return value if result is None else result
+
+
+def sync_validate(step: DialogStep, value: Any, ctx: StepContext | None = None) -> Any:
     """Validate *value* against *step*'s rules synchronously.
 
-    Returns the cleaned value on success.
-    Raises :class:`ValidationError` on failure.
-    Unknown step types pass through without validation.
+    Runs the built-in check for the step type, then the step's own
+    :attr:`~DialogStep.validator`.  Returns the cleaned value on success.
+    Raises :class:`ValidationError` on failure and :class:`DialogError` if the
+    step validator is async.  Unknown step types pass the built-in check as is.
     """
-    is_empty = value is None or (isinstance(value, str) and not value.strip())
-    if is_empty:
+    if _is_empty(value):
         if step.required:
             raise ValidationError("Это поле обязательно для заполнения.", step.id)
         return value  # optional → accept empty
 
     fn = _VALIDATORS.get(step.type)
-    if fn is None:
-        return value
-    return fn(value, step)
+    cleaned = value if fn is None else fn(value, step)
+    if step.validator is None:
+        return cleaned
+
+    result = step.validator(cleaned, _context_for(step, ctx))
+    if inspect.isawaitable(result):
+        if inspect.iscoroutine(result):
+            result.close()
+        raise DialogError(
+            f"Step {step.id!r} has an async validator; use async_submit()."
+        )
+    return _keep_or_replace(cleaned, result)
 
 
-def validate(step: DialogStep, value: Any) -> Any:
+def validate(step: DialogStep, value: Any, ctx: StepContext | None = None) -> Any:
     """Validate *value* against *step*'s rules.
 
     Returns the cleaned value on success.
     Raises :class:`ValidationError` on failure.
     Unknown step types pass through without validation.
     """
-    return sync_validate(step, value)
+    return sync_validate(step, value, ctx)
 
 
-async def async_validate(step: DialogStep, value: Any) -> Any:
+async def async_validate(
+    step: DialogStep, value: Any, ctx: StepContext | None = None
+) -> Any:
     """Validate *value* against *step*'s rules asynchronously.
 
+    Same as :func:`sync_validate`, but the step validator may be async.
     Returns the cleaned value on success.
     Raises :class:`ValidationError` on failure.
-    Unknown step types pass through without validation.
     """
-    is_empty = value is None or (isinstance(value, str) and not value.strip())
-    if is_empty:
+    if _is_empty(value):
         if step.required:
             raise ValidationError("Это поле обязательно для заполнения.", step.id)
         return value  # optional → accept empty
 
-    fn = _ASYNC_VALIDATORS.get(step.type) or _VALIDATORS.get(step.type)
-    if fn is None:
-        return value
-
-    if asyncio.iscoroutinefunction(fn):
-        return await fn(value, step)
+    fn = _ASYNC_VALIDATORS.get(step.type)
+    if fn is not None:
+        warnings.warn(
+            "_ASYNC_VALIDATORS is deprecated; set DialogStep.validator instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
     else:
-        return fn(value, step)
+        fn = _VALIDATORS.get(step.type)
+
+    cleaned = value
+    if fn is not None:
+        cleaned = fn(value, step)
+        if inspect.isawaitable(cleaned):
+            cleaned = await cleaned
+    if step.validator is None:
+        return cleaned
+
+    result = step.validator(cleaned, _context_for(step, ctx))
+    if inspect.isawaitable(result):
+        result = await result
+    return _keep_or_replace(cleaned, result)

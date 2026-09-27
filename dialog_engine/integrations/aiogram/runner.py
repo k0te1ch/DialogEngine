@@ -51,6 +51,9 @@ class DialogTurn:
     answers: dict[str, Any] = field(default_factory=dict)
     """Собранные ответы — заполняются при ``finished``."""
 
+    context: dict[str, Any] = field(default_factory=dict)
+    """Контекст сессии на момент завершения — заполняется при ``finished``."""
+
     alert: str | None = None
     """Короткое уведомление, которое стоит показать всплывающим окном."""
 
@@ -71,9 +74,19 @@ class DialogRunner:
 
     # ── Запуск ────────────────────────────────────────────────────────────────
 
-    async def start(self, state: FSMContext, sender: DialogSender) -> DialogTurn:
-        """Начать анкету заново, отбросив предыдущую сессию в этом чате."""
-        session = self.engine.create_session()
+    async def start(
+        self,
+        state: FSMContext,
+        sender: DialogSender,
+        *,
+        context: dict[str, Any] | None = None,
+    ) -> DialogTurn:
+        """Начать анкету заново, отбросив предыдущую сессию в этом чате.
+
+        *context* — стартовые данные сессии (язык, идентификаторы); их видят
+        валидаторы шагов и ``text_resolver``. Должны сериализоваться в JSON.
+        """
+        session = self.engine.create_session(context=context)
         ui = DialogUIState()
         await self._render(session, ui, sender)
         await self.storage.save(state, session, ui)
@@ -259,8 +272,9 @@ class DialogRunner:
         ui.reset_step()
         if self.engine.current_step(session) is None:
             answers = dict(session.answers)
+            context = dict(session.context)
             await self.storage.clear(state)
-            return DialogTurn(finished=True, answers=answers)
+            return DialogTurn(finished=True, answers=answers, context=context)
         return await self._redraw(session, ui, state, sender)
 
     async def _redraw(
