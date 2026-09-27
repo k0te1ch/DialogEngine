@@ -521,3 +521,48 @@ async def test_on_files_checks_constraints(state, sender):
             "file_size": 5,
         }
     ]
+
+
+# ── «Назад» с прежним ответом ────────────────────────────────────────────────
+
+
+def _buttons(view):
+    return [
+        (b.text, b.callback_data) for row in view.keyboard.inline_keyboard for b in row
+    ]
+
+
+@pytest.mark.asyncio
+async def test_back_offers_to_keep_previous_answer(runner, engine, state, sender):
+    await runner.start(state, sender)
+    await runner.on_callback(
+        payload(engine, "subject", DialogAction.PICK, 1), state, sender
+    )
+    await runner.on_text("Задача", state, sender)
+    await runner.on_callback(
+        payload(engine, "deadline", DialogAction.BACK), state, sender
+    )
+
+    # Текстовый шаг: прежний ответ виден на кнопке.
+    keep = [b for b in _buttons(sender.last) if b[0].startswith("Оставить")]
+    assert keep[0][0] == "Оставить: Задача"
+    await runner.on_callback(keep[0][1], state, sender)
+    assert sender.last.step.id == "deadline"
+
+    await runner.on_callback(
+        payload(engine, "deadline", DialogAction.BACK), state, sender
+    )
+    await runner.on_callback(payload(engine, "task", DialogAction.BACK), state, sender)
+    # Шаг выбора: прежний вариант отмечен.
+    texts = [t for t, _ in _buttons(sender.last)]
+    assert LAYOUT.selected_mark + "Физика" in texts
+    assert "Оставить как есть" in texts
+
+
+@pytest.mark.asyncio
+async def test_keep_button_without_draft_is_stale(runner, engine, state, sender):
+    await runner.start(state, sender)
+    turn = await runner.on_callback(
+        payload(engine, "subject", DialogAction.KEEP), state, sender
+    )
+    assert turn.alert == aiogram_integration.runner.STALE_BUTTON_ALERT
