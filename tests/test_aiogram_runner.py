@@ -604,3 +604,31 @@ async def test_confirm_step_edit_and_confirm(state, sender):
     turn = await runner.on_callback(buttons["✅ Подтвердить"], state, sender)
     assert turn.finished
     assert turn.answers == {"title": "Выпуск 2", "confirm": True}
+
+
+# ── Истечение сессии ─────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_expired_dialog_is_closed_with_message(state, sender):
+    now = [0.0]
+    engine = DialogEngine(
+        DialogEngine.from_list(STEPS).steps,
+        dialog_id="homework",
+        ttl=30,
+        clock=lambda: now[0],
+    )
+    runner = DialogRunner(engine, layout=LAYOUT)
+    await runner.start(state, sender)
+    anchor_views = len(sender.views)
+
+    now[0] = 31
+    turn = await runner.on_text("что-то", state, sender)
+    assert turn.expired and turn.cancelled
+    assert turn.alert == "Анкета устарела — начните заново."
+    assert len(sender.views) == anchor_views + 1
+    assert sender.last.text == turn.alert and sender.last.keyboard is None
+    assert (await runner.storage.load(state))[0] is None
+
+    second = await runner.on_text("ещё", state, sender)
+    assert second.handled is False

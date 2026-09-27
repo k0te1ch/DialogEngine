@@ -53,6 +53,7 @@ DEFAULT_MESSAGES: dict[str, str] = {
     "de.error.button_required": "Выберите вариант с помощью кнопок.",
     "de.alert.no_session": "Диалог не запущен или уже завершён.",
     "de.alert.stale_button": "Кнопка устарела — ответьте на текущий вопрос.",
+    "de.alert.expired": "Анкета устарела — начните заново.",
 }
 
 

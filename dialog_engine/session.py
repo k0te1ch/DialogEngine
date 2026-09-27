@@ -30,6 +30,9 @@ class DialogSession:
         drafts:    Answers taken back by ``back()`` / ``jump_to()``, keyed by
                    step ID.  Not answers any more — a hint to offer the user
                    the previous value (see :meth:`DialogEngine.keep`).
+        expires_at: UNIX time (UTC seconds) after which the session is
+                   abandoned; ``None`` means no limit.  Set and extended by
+                   an engine with ``ttl``.
         return_to: Step to come back to after an edit started with
                    ``jump_to(..., return_to=...)``; ``None`` otherwise.
 
@@ -45,6 +48,7 @@ class DialogSession:
     dialog_version: str | int | None = None
     drafts: dict[str, Any] = field(default_factory=dict)
     return_to: str | None = None
+    expires_at: float | None = None
     _history: list[int] = field(default_factory=list, repr=False)
 
     # ── Properties ────────────────────────────────────────────────────────────
@@ -72,6 +76,7 @@ class DialogSession:
             "dialog_version": self.dialog_version,
             "drafts": self.drafts,
             "return_to": self.return_to,
+            "expires_at": self.expires_at,
         }
 
     @classmethod
@@ -86,6 +91,7 @@ class DialogSession:
             dialog_version=data.get("dialog_version"),
             drafts=dict(data.get("drafts") or {}),
             return_to=data.get("return_to"),
+            expires_at=data.get("expires_at"),
         )
         session._history = list(data.get("history", []))
         return session
