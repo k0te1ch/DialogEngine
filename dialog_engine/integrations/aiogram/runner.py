@@ -71,7 +71,7 @@ class DialogRunner:
     ) -> None:
         self.engine = engine
         self.layout = layout
-        self.storage = storage or FSMDialogStorage()
+        self.storage = storage or FSMDialogStorage.for_engine(engine)
 
     # ── Запуск ────────────────────────────────────────────────────────────────
 
@@ -117,6 +117,8 @@ class DialogRunner:
         try:
             callback = DialogCallback.unpack(payload)
         except CallbackParseError:
+            return DialogTurn(handled=False)
+        if not callback.belongs_to(self.engine.dialog_id):
             return DialogTurn(handled=False)
 
         session, ui = await self.storage.load(state)
@@ -320,6 +322,7 @@ class DialogRunner:
                 selected=ui.selected,
                 can_go_back=position > 1,
                 layout=await self._translated_layout(session),
+                dialog_id=self.engine.dialog_id,
             ),
             step=step,
             error=error,

@@ -73,3 +73,22 @@ def test_parse_error_is_dialog_error():
 def test_pack_rejects_payload_over_limit():
     with pytest.raises(DialogError):
         DialogCallback(DialogAction.PICK, "x" * 100, 1).pack()
+
+
+def test_dialog_token_round_trip():
+    step = DialogStep(id="s", type="choice", text="t", choices={"a": "A"})
+    payload = aiogram_integration.build(DialogAction.PICK, step, 3, dialog_id="upload")
+    callback = aiogram_integration.DialogCallback.unpack(payload)
+    assert callback.dialog_token == aiogram_integration.callbacks.dialog_token("upload")
+    assert callback.arg == 3
+    assert callback.belongs_to("upload")
+    assert not callback.belongs_to("confirm")
+
+
+def test_legacy_payload_belongs_to_any_dialog():
+    step = DialogStep(id="s", type="choice", text="t", choices={"a": "A"})
+    callback = aiogram_integration.DialogCallback.unpack(
+        aiogram_integration.build(DialogAction.PICK, step, 0)
+    )
+    assert callback.dialog_token == ""
+    assert callback.belongs_to("anything")

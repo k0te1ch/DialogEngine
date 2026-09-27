@@ -172,6 +172,26 @@ What it gives you:
   (Bot API 10.3) that only the member filling it in can see; with an ephemeral
   entry command and `force_reply`, the answers stay invisible too.
 
+### Several dialogs in one chat
+
+Each runner stores its session under `dialog_engine:<dialog_id>`, and its
+buttons carry a short dialog token, so routers of different dialogs can be
+included side by side: a button reaches only its own runner. Sessions saved by
+0.2 under the shared `dialog_engine` key are picked up and moved on first load.
+
+Two copies of the same dialog (say, a confirmation per message) need their own
+storage scope; build a runner for that scope in your handler:
+
+```python
+storage = FSMDialogStorage.for_engine(confirm_engine, scope=message.message_id)
+runner = DialogRunner(confirm_engine, storage=storage)
+```
+
+`DialogEngine.restore_session()` returns `None` for a session of another
+dialog, of another schema `version` (pass `version=` to the engine or put
+`"version"` in the JSON), or pointing past the end of the schema. Text answers
+go to the first included router whose dialog is active.
+
 ### Ephemeral messages in groups
 
 An ephemeral message needs a receiver and, unless the bot is a chat admin, a

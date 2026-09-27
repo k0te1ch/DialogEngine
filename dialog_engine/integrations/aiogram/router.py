@@ -63,13 +63,20 @@ class DialogCallbackFilter(Filter):
     """Пропускает только кнопки dialog_engine.
 
     Чужие ``callback_data`` отсеиваются до раннера, чтобы роутер анкеты мог
-    спокойно соседствовать с остальными кнопками бота.
+    спокойно соседствовать с остальными кнопками бота. С *dialog_id* фильтр
+    пропускает только кнопки этой анкеты — так в одном чате уживаются
+    роутеры нескольких анкет.
     """
+
+    def __init__(self, dialog_id: str | None = None) -> None:
+        self.dialog_id = dialog_id
 
     async def __call__(self, query: CallbackQuery) -> bool | dict[str, Any]:
         try:
             callback = DialogCallback.unpack(query.data)
         except CallbackParseError:
+            return False
+        if self.dialog_id is not None and not callback.belongs_to(self.dialog_id):
             return False
         return {"dialog_callback": callback}
 
@@ -122,7 +129,7 @@ def build_dialog_router(
     make_sender = event_sender_factory or _chat_sender_factory(sender_factory)
     router = Router(name=name or f"dialog:{runner.engine.dialog_id}")
 
-    @router.callback_query(DialogCallbackFilter())
+    @router.callback_query(DialogCallbackFilter(runner.engine.dialog_id))
     async def _on_callback(query: CallbackQuery, state: FSMContext) -> None:
         sender = make_sender(query)
         turn = await runner.on_callback(query.data, state, sender)

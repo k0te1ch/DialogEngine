@@ -144,3 +144,40 @@ def test_from_file_reads_bare_and_wrapped_formats():
     assert loaded.dialog_id == "wrapped"
     assert loaded.steps[0].id == "a"
     tmp_path.unlink()
+
+
+# ── Восстановление только своей сессии ───────────────────────────────────────
+
+
+def test_restore_rejects_other_dialog():
+    other = DialogEngine.from_list([{"id": "x", "type": "text", "text": "x"}], "other")
+    data = other.create_session().to_dict()
+    assert engine.restore_session(data) is None
+
+
+def test_restore_rejects_other_version():
+    steps = [{"id": "x", "type": "text", "text": "x"}]
+    v1 = DialogEngine.from_list(steps, dialog_id="d", version=1)
+    v2 = DialogEngine.from_list(steps, dialog_id="d", version=2)
+    data = v1.create_session().to_dict()
+    assert v1.restore_session(data) is not None
+    assert v2.restore_session(data) is None
+
+
+def test_restore_rejects_position_outside_schema():
+    steps = [{"id": "x", "type": "text", "text": "x"}]
+    short = DialogEngine.from_list(steps, dialog_id="d")
+    data = {"dialog_id": "d", "answers": {}, "history": [0, 3]}
+    assert short.restore_session(data) is None
+
+
+def test_version_in_schema_dict(tmp_path):
+    path = tmp_path / "form.json"
+    path.write_text(
+        '{"id": "form", "version": 2, "steps": [{"id": "x", "type": "text", "text": "x"}]}',
+        encoding="utf-8",
+    )
+    loaded = DialogEngine.from_file(path)
+    assert loaded.version == 2
+    assert loaded.to_dict()["version"] == 2
+    assert loaded.create_session().to_dict()["dialog_version"] == 2

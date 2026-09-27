@@ -17,6 +17,7 @@ from typing import Any
 
 from aiogram.fsm.context import FSMContext
 
+from dialog_engine.engine import DialogEngine
 from dialog_engine.session import DialogSession
 
 from .views import MessageAnchor
@@ -61,10 +62,49 @@ class DialogUIState:
 
 
 class FSMDialogStorage:
-    """Чтение и запись состояния диалога в данных ``FSMContext``."""
+    """Чтение и запись состояния диалога в данных ``FSMContext``.
 
-    def __init__(self, key: str = DEFAULT_STORAGE_KEY) -> None:
+    Каждая анкета лежит под своим ключом, поэтому в одном чате их может идти
+    несколько. :meth:`for_engine` строит ключ от ``dialog_id`` и сверяет
+    восстановленную сессию с движком; голый конструктор оставлен для ключа,
+    выбранного вручную.
+    """
+
+    def __init__(
+        self,
+        key: str = DEFAULT_STORAGE_KEY,
+        *,
+        engine: DialogEngine | None = None,
+        legacy_keys: tuple[str, ...] = (),
+    ) -> None:
+        """Создать хранилище под ключом *key*.
+
+        Args:
+            key: ключ в данных FSM.
+            engine: движок, через который восстанавливать сессию; чужая
+                сессия (другой ``dialog_id`` или версия схемы) тогда
+                считается отсутствующей.
+            legacy_keys: ключи, под которыми сессия могла лежать раньше.
+                Найденная там своя сессия переносится под *key*.
+        """
         self.key = key
+        self.engine = engine
+        self.legacy_keys = legacy_keys
+
+    @classmethod
+    def for_engine(
+        cls, engine: DialogEngine, scope: str | int | None = None
+    ) -> FSMDialogStorage:
+        """Хранилище анкеты *engine*: ключ ``dialog_engine:<dialog_id>``.
+
+        *scope* разводит несколько копий одной анкеты в чате — например,
+        подтверждение для конкретного сообщения (``scope=message_id``).
+        Сессии, сохранённые до 0.3 под общим ключом, подхватываются.
+        """
+        key = f"{DEFAULT_STORAGE_KEY}:{engine.dialog_id}"
+        if scope is not None:
+            return cls(f"{key}:{scope}", engine=engine)
+        return cls(key, engine=engine, legacy_keys=(DEFAULT_STORAGE_KEY,))
 
     async def load(
         self, state: FSMContext
@@ -76,11 +116,30 @@ class FSMDialogStorage:
         """
         data = await state.get_data()
         raw = data.get(self.key)
-        if not raw:
+        if raw:
+            return self._restore(raw)
+        for legacy in self.legacy_keys:
+            raw = data.get(legacy)
+            if not raw:
+                continue
+            session, ui = self._restore(raw)
+            if session is not None:
+                data.pop(legacy)
+                data[self.key] = raw
+                await state.set_data(data)
+                return session, ui
+        return None, DialogUIState()
+
+    def _restore(
+        self, raw: dict[str, Any]
+    ) -> tuple[DialogSession | None, DialogUIState]:
+        if self.engine is not None:
+            session = self.engine.restore_session(raw["session"])
+        else:
+            session = DialogSession.from_dict(raw["session"])
+        if session is None:
             return None, DialogUIState()
-        session = DialogSession.from_dict(raw["session"])
-        ui = DialogUIState.from_dict(raw.get("ui", {}))
-        return session, ui
+        return session, DialogUIState.from_dict(raw.get("ui", {}))
 
     async def save(
         self, state: FSMContext, session: DialogSession, ui: DialogUIState

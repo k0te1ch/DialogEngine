@@ -54,6 +54,19 @@ async def test_callback_filter_passes_parsed_callback():
 
 
 @pytest.mark.asyncio
+async def test_callback_filter_with_dialog_id_skips_other_dialogs():
+    token = aiogram_integration.callbacks.dialog_token
+    own = DialogCallback(DialogAction.PICK, step_token("name"), 0, token("upload"))
+    other = DialogCallback(DialogAction.PICK, step_token("name"), 0, token("confirm"))
+    legacy = DialogCallback(DialogAction.PICK, step_token("name"), 0)
+    check = DialogCallbackFilter("upload")
+
+    assert await check(SimpleNamespace(data=own.pack()))
+    assert await check(SimpleNamespace(data=legacy.pack()))
+    assert await check(SimpleNamespace(data=other.pack())) is False
+
+
+@pytest.mark.asyncio
 async def test_callback_filter_ignores_foreign_buttons():
     assert await DialogCallbackFilter()(SimpleNamespace(data="menu:open")) is False
 

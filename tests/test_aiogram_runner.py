@@ -121,7 +121,7 @@ async def test_one_message_is_redrawn_for_every_step(runner, engine, state, send
     await runner.start(state, sender)
     await pick(runner, engine, state, sender, "subject", 0)
 
-    _session, ui = await FSMDialogStorage().load(state)
+    _session, ui = await runner.storage.load(state)
     assert ui.anchor == MessageAnchor(chat_id=42, message_id=100)
     assert len(sender.views) == 2  # два показа, но привязка одна
 
@@ -165,7 +165,7 @@ async def test_page_switch_does_not_touch_answers(runner, engine, state, sender)
         payload(engine, "subject", DialogAction.PAGE, 1), state, sender
     )
 
-    session, ui = await FSMDialogStorage().load(state)
+    session, ui = await runner.storage.load(state)
     assert ui.page == 1
     assert session.answers == {}
 
@@ -179,7 +179,7 @@ async def test_page_resets_on_the_next_step(runner, engine, state, sender):
     await pick(runner, engine, state, sender, "subject", 2)
     await runner.on_text("Решить задачи 1-5", state, sender)
 
-    _session, ui = await FSMDialogStorage().load(state)
+    _session, ui = await runner.storage.load(state)
     assert ui.page == 0
 
 
@@ -191,7 +191,7 @@ async def test_button_from_a_previous_step_is_rejected(runner, engine, state, se
     turn = await pick(runner, engine, state, sender, "subject", 1)
 
     assert turn.alert == aiogram_integration.runner.STALE_BUTTON_ALERT
-    session, _ui = await FSMDialogStorage().load(state)
+    session, _ui = await runner.storage.load(state)
     assert session.answers == {"subject": "math"}
 
 
@@ -244,7 +244,7 @@ async def test_back_returns_to_the_previous_step_and_erases_its_answer(
 
     await runner.on_callback(payload(engine, "task", DialogAction.BACK), state, sender)
 
-    session, _ui = await FSMDialogStorage().load(state)
+    session, _ui = await runner.storage.load(state)
     assert sender.last.step.id == "subject"
     assert session.answers == {}  # движок стирает ответ шага, на который вернулись
 
@@ -270,7 +270,7 @@ async def test_skip_is_refused_on_a_required_step(runner, engine, state, sender)
     )
 
     assert turn.alert is not None
-    session, _ui = await FSMDialogStorage().load(state)
+    session, _ui = await runner.storage.load(state)
     assert session.answers == {}
 
 
@@ -312,7 +312,7 @@ async def test_multi_choice_collects_selection_outside_of_answers(state, sender)
     await runner.on_callback(
         build(DialogAction.PICK, engine.steps[0], 2), state, sender
     )
-    session, ui = await FSMDialogStorage().load(state)
+    session, ui = await runner.storage.load(state)
 
     assert ui.selected == ["mon", "wed"]
     assert session.answers == {}
@@ -347,7 +347,7 @@ async def test_multi_choice_pick_toggles_off(state, sender):
         build(DialogAction.PICK, engine.steps[0], 0), state, sender
     )
 
-    _session, ui = await FSMDialogStorage().load(state)
+    _session, ui = await runner.storage.load(state)
     assert ui.selected == []
 
 
@@ -451,3 +451,35 @@ async def test_without_translation_labels_unchanged(runner, state, sender):
     await runner.on_text("ab", state, sender)
     assert sender.last.error == "Слишком короткий текст (минимум 3 символов)."
     assert LAYOUT.back_text in _texts(sender.last)
+
+
+# ── Две анкеты в одном чате ──────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_two_dialogs_in_one_chat(runner, state, sender):
+    confirm_engine = DialogEngine.from_list(
+        [{"id": "ok", "type": "choice", "text": "Переслать?", "choices": {"y": "Да"}}],
+        dialog_id="confirm",
+    )
+    confirm = DialogRunner(confirm_engine, layout=LAYOUT)
+    other_sender = FakeSender()
+
+    await runner.start(state, sender)
+    await confirm.start(state, other_sender)
+
+    homework_button = sender.last.keyboard.inline_keyboard[0][0].callback_data
+    confirm_button = other_sender.last.keyboard.inline_keyboard[0][0].callback_data
+
+    # Чужая кнопка не обрабатывается и не трогает свою анкету.
+    assert (
+        await confirm.on_callback(homework_button, state, other_sender)
+    ).handled is False
+    assert (await runner.on_callback(confirm_button, state, sender)).handled is False
+
+    turn = await confirm.on_callback(confirm_button, state, other_sender)
+    assert turn.finished and turn.answers == {"ok": "y"}
+
+    await runner.on_callback(homework_button, state, sender)
+    session, _ui = await runner.storage.load(state)
+    assert session.answers == {"subject": "math"}
