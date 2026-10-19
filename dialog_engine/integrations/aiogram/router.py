@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 from enum import StrEnum
-from typing import Any
+from typing import Any, cast
 
 from aiogram import Bot, F, Router
 from aiogram.enums import ChatType, ContentType
@@ -140,7 +140,11 @@ def build_dialog_router(
         raise ValueError(
             "Передайте ровно одно из sender_factory и event_sender_factory."
         )
-    make_sender = event_sender_factory or _chat_sender_factory(sender_factory)
+    if event_sender_factory is not None:
+        make_sender = event_sender_factory
+    else:
+        assert sender_factory is not None
+        make_sender = _chat_sender_factory(sender_factory)
     router = Router(name=name or f"dialog:{runner.engine.dialog_id}")
 
     @router.callback_query(DialogCallbackFilter(runner.engine.dialog_id))
@@ -173,7 +177,8 @@ def build_dialog_router(
 def _chat_sender_factory(factory: SenderFactory) -> EventSenderFactory:
     def make(event: CallbackQuery | Message) -> DialogSender:
         message = event.message if isinstance(event, CallbackQuery) else event
-        return factory(event.bot, message.chat.id)
+        chat = cast(Message, message).chat
+        return factory(cast(Bot, event.bot), chat.id)
 
     return make
 

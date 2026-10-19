@@ -16,7 +16,7 @@ data, and the engine drives navigation, validation, and session state.
 - Built-in answer validation plus custom validators, both sync and async.
 - Text resolvers with substitution from collected answers (`{name}`, etc.).
 - Session management with `IN_PROGRESS / COMPLETED / CANCELLED` statuses.
-- Optional extras: `pydantic` validation, loading schemas from YAML, `aiogram` integration.
+- Optional extras: loading schemas from YAML (`yaml`), `aiogram` integration.
 
 ## Installation
 

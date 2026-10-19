@@ -8,7 +8,7 @@ import time
 from collections.abc import Awaitable, Callable
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from .exceptions import (
     DialogError,
@@ -179,13 +179,25 @@ class DialogEngine:
         validators: dict[str, StepValidator] | None = None,
         ttl: float | timedelta | None = None,
     ) -> DialogEngine:
-        """Load a dialog from a JSON file.
+        """Load a dialog from a JSON or YAML file.
 
-        Supports both bare-list and wrapped-dict formats (see class docstring).
-        *validators* is the same as in :meth:`from_list`.
+        ``.yaml`` / ``.yml`` files need the ``yaml`` extra; anything else is
+        read as JSON.  Supports both bare-list and wrapped-dict formats (see
+        class docstring).  *validators* is the same as in :meth:`from_list`.
         """
         path = Path(path)
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
+        if path.suffix.lower() in (".yaml", ".yml"):
+            try:
+                import yaml
+            except ImportError as exc:
+                raise DialogError(
+                    "Reading YAML dialogs requires the 'yaml' extra: "
+                    "pip install dialog-engine[yaml]"
+                ) from exc
+            raw = yaml.safe_load(text)
+        else:
+            raw = json.loads(text)
         if isinstance(raw, dict):
             dialog_id: str = raw.get("id", path.stem)
             steps_data: list[dict] = raw["steps"]
@@ -471,7 +483,7 @@ class DialogEngine:
             raise DialogError(
                 "Async text resolver requires calling async_resolve_text() instead"
             )
-        text = self.text_resolver(*self._resolver_args(step.text, session))
+        text = cast(str, self.text_resolver(*self._resolver_args(step.text, session)))
         return self._fill_summary(step, text, session)
 
     async def async_resolve_text(
@@ -485,7 +497,10 @@ class DialogEngine:
         """
         if not self._is_async_resolver:
             return self.resolve_text(step, session)
-        text = await self.text_resolver(*self._resolver_args(step.text, session))
+        text = await cast(
+            Awaitable[str],
+            self.text_resolver(*self._resolver_args(step.text, session)),
+        )
         return self._fill_summary(step, text, session)
 
     def translate(
@@ -508,7 +523,7 @@ class DialogEngine:
                 "Async text resolver requires calling async_translate() instead"
             )
         try:
-            raw = self.text_resolver(*self._resolver_args(key, session))
+            raw = cast(str, self.text_resolver(*self._resolver_args(key, session)))
         except LookupError:
             raw = key
         return _finish_translation(key, raw, default, params)
@@ -525,7 +540,9 @@ class DialogEngine:
         if not self._is_async_resolver:
             return self.translate(key, session, default=default, params=params)
         try:
-            raw = await self.text_resolver(*self._resolver_args(key, session))
+            raw = await cast(
+                Awaitable[str], self.text_resolver(*self._resolver_args(key, session))
+            )
         except LookupError:
             raw = key
         return _finish_translation(key, raw, default, params)
