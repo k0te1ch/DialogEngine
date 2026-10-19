@@ -1,5 +1,6 @@
 """Тесты фильтров и сборки роутера."""
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -217,3 +218,41 @@ async def test_ephemeral_answers_are_left_alone(state, policy):
 
     assert message.deleted is False
     assert completed == [{"name": "Алиса"}]
+
+
+class FakePhoto:
+    def __init__(self, file_id, group_id="g1"):
+        self.photo = [
+            SimpleNamespace(file_id=file_id, width=10, height=10, file_size=1)
+        ]
+        self.media_group_id = group_id
+        self.chat = SimpleNamespace(id=42, type="private")
+        self.bot = None
+        for field in ("document", "audio", "video", "voice", "animation", "video_note"):
+            setattr(self, field, None)
+
+
+@pytest.mark.asyncio
+async def test_album_is_collected_into_one_answer(state):
+    runner = DialogRunner(
+        DialogEngine.from_list(
+            [{"id": "pics", "type": "photo", "text": "Фото", "max": 3}]
+        )
+    )
+    completed = []
+
+    async def on_complete(event, answers):
+        completed.append(answers)
+
+    router = build_dialog_router(
+        runner,
+        event_sender_factory=lambda event: FakeSender(),
+        on_complete=on_complete,
+        album_wait=0.05,
+    )
+    await runner.start(state, FakeSender())
+    handler = router.message.handlers[-1].callback
+
+    await asyncio.gather(*(handler(FakePhoto(i), state) for i in ("a", "b", "c")))
+
+    assert completed == [{"pics": ["a", "b", "c"]}]
