@@ -181,3 +181,14 @@ def test_version_in_schema_dict(tmp_path):
     assert loaded.version == 2
     assert loaded.to_dict()["version"] == 2
     assert loaded.create_session().to_dict()["dialog_version"] == 2
+
+
+def test_from_file_reads_yaml(tmp_path):
+    path = tmp_path / "flow.yaml"
+    path.write_text(
+        "id: flow\nsteps:\n  - id: name\n    type: text\n    text: Name?\n",
+        encoding="utf-8",
+    )
+    engine = DialogEngine.from_file(path)
+    assert engine.dialog_id == "flow"
+    assert engine.steps[0].id == "name"

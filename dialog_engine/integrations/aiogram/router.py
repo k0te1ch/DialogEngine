@@ -7,10 +7,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from enum import StrEnum
-from typing import Any
+from typing import Any, cast
 
 from aiogram import Bot, F, Router
 from aiogram.enums import ChatType, ContentType
@@ -18,6 +19,8 @@ from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import Filter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, TelegramObject
+
+from dialog_engine.files import FileInfo
 
 from .callbacks import CallbackParseError, DialogCallback
 from .files import message_files
@@ -117,6 +120,7 @@ def build_dialog_router(
     on_complete: CompletionHandler | None = None,
     on_cancel: CompletionHandler | None = None,
     text_answers: TextAnswerPolicy = TextAnswerPolicy.KEEP,
+    album_wait: float = 0.5,
     name: str | None = None,
 ) -> Router:
     """Собрать роутер, ведущий анкету *runner*.
@@ -133,6 +137,10 @@ def build_dialog_router(
     :class:`TextAnswerPolicy`. Удаление идёт после обработки ответа, поэтому
     ответ не теряется, даже если удалить сообщение не удалось.
 
+    Альбом Telegram присылает отдельными сообщениями с общим
+    ``media_group_id``. Роутер ждёт *album_wait* секунд, собирает их в один
+    ответ и отдаёт движку списком; 0 отключает сборку.
+
     Raises:
         ValueError: не передано ни одной фабрики или переданы обе.
     """
@@ -140,8 +148,13 @@ def build_dialog_router(
         raise ValueError(
             "Передайте ровно одно из sender_factory и event_sender_factory."
         )
-    make_sender = event_sender_factory or _chat_sender_factory(sender_factory)
+    if event_sender_factory is not None:
+        make_sender = event_sender_factory
+    else:
+        assert sender_factory is not None
+        make_sender = _chat_sender_factory(sender_factory)
     router = Router(name=name or f"dialog:{runner.engine.dialog_id}")
+    albums: dict[tuple[int, str], list[FileInfo]] = {}
 
     @router.callback_query(DialogCallbackFilter(runner.engine.dialog_id))
     async def _on_callback(query: CallbackQuery, state: FSMContext) -> None:
@@ -163,8 +176,19 @@ def build_dialog_router(
         DialogActiveFilter(runner.storage), F.content_type.in_(FILE_CONTENT_TYPES)
     )
     async def _on_files(message: Message, state: FSMContext) -> None:
+        files = message_files(message)
+        group_id = message.media_group_id
+        if group_id and album_wait > 0:
+            key = (message.chat.id, group_id)
+            pending = albums.get(key)
+            if pending is not None:
+                pending.extend(files)
+                return
+            albums[key] = files
+            await asyncio.sleep(album_wait)
+            files = albums.pop(key)
         sender = make_sender(message)
-        turn = await runner.on_files(message_files(message), state, sender)
+        turn = await runner.on_files(files, state, sender)
         await _notify(turn, message, on_complete, on_cancel)
 
     return router
@@ -173,7 +197,8 @@ def build_dialog_router(
 def _chat_sender_factory(factory: SenderFactory) -> EventSenderFactory:
     def make(event: CallbackQuery | Message) -> DialogSender:
         message = event.message if isinstance(event, CallbackQuery) else event
-        return factory(event.bot, message.chat.id)
+        chat = cast(Message, message).chat
+        return factory(cast(Bot, event.bot), chat.id)
 
     return make
 

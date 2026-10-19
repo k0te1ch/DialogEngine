@@ -27,6 +27,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 from aiogram import Bot
 from aiogram.enums import ChatType
 from aiogram.types import (
@@ -102,13 +104,14 @@ class EphemeralSender(DefaultSender):
         """
         if event.from_user is None:
             raise DialogError("Эфемерному сообщению нужен получатель.")
+        bot = cast(Bot, event.bot)
         if isinstance(event, CallbackQuery):
             message = event.message
             if message is None:
                 raise DialogError("Нажатие без сообщения: чат неизвестен.")
             from_ephemeral = getattr(message, "ephemeral_message_id", None) is not None
             return cls(
-                event.bot,
+                bot,
                 message.chat.id,
                 event.from_user.id,
                 callback_query_id=event.id,
@@ -117,7 +120,7 @@ class EphemeralSender(DefaultSender):
                 ),
             )
         return cls(
-            event.bot,
+            bot,
             event.chat.id,
             event.from_user.id,
             reply_to_ephemeral_message_id=event.ephemeral_message_id,
@@ -184,4 +187,4 @@ def ephemeral_in_groups(event: CallbackQuery | Message) -> DialogSender:
         raise DialogError("Нажатие без сообщения: чат неизвестен.")
     if message.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP):
         return EphemeralSender.for_event(event)
-    return DefaultSender(event.bot, message.chat.id)
+    return DefaultSender(cast(Bot, event.bot), message.chat.id)

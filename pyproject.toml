@@ -16,7 +16,6 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
-validation = ["pydantic>=2.0,<3.0"]
 yaml = ["PyYAML>=6.0"]
 aiogram = ["aiogram>=3.31,<4.0; python_version < '3.15'"]
 
@@ -35,6 +34,9 @@ pytest-cov = "^4.0"
 pre-commit = "^3.4"
 commitizen = "^4.4"
 pytest-asyncio = ">=0.24"
+pyyaml = "^6.0"
+mypy = "^1.10"
+types-pyyaml = "^6.0"
 
 [build-system]
 requires = ["poetry-core>=2.0.0"]
@@ -81,3 +83,9 @@ major_version_zero = true
 # (.github/workflows/release-please.yml). commitizen is used here only to
 # validate commit messages via the pre-commit commit-msg hook.
 update_changelog_on_bump = false
+
+[tool.mypy]
+python_version = "3.12"
+files = ["dialog_engine"]
+ignore_missing_imports = true
+warn_unused_ignores = true
