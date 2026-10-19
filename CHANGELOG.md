@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/k0te1ch/DialogEngine/compare/v0.3.0...v0.4.0) (2026-10-19)
+
+
+### Features
+
+* yaml dialogs, album collection and mypy ([#19](https://github.com/k0te1ch/DialogEngine/issues/19)) ([1bc7d0d](https://github.com/k0te1ch/DialogEngine/commit/1bc7d0d66d1120d4d7023d5ead6118400b590245))
+
 ## [0.3.0](https://github.com/k0te1ch/DialogEngine/compare/v0.2.0...v0.3.0) (2026-09-27)
 
 
