@@ -18,77 +18,16 @@ from .exceptions import (
 )
 from .session import DialogSession, SessionStatus
 from .step import DialogStep, StepContext, StepValidator
+from .text import (
+    AsyncTextResolver,
+    TextResolver,
+    fill_summary,
+    finish_translation,
+    passthrough_resolver,
+    takes_context,
+)
 from .validators import async_validate as _async_validate
 from .validators import sync_validate as _validate
-
-# ── Text resolver type ────────────────────────────────────────────────────────
-
-TextResolver = Callable[..., str]
-AsyncTextResolver = Callable[..., Awaitable[str]]
-"""A callable that resolves a step's ``text`` field for display.
-
-Signature (sync or async)::
-
-    def resolver(key: str, answers: dict[str, Any], context: dict[str, Any]) -> str
-
-*key* is ``step.text``; *answers* are the session answers and *context* is
-:attr:`DialogSession.context`, so the resolver can pick a language or
-interpolate values the caller put there.  The older two-argument form
-``resolver(key, answers)`` is still accepted.
-
-The default resolver returns *key* unchanged, which works well when
-``text`` already contains the full display string.
-"""
-
-
-def _passthrough_resolver(key: str, _answers: dict[str, Any]) -> str:
-    return key
-
-
-def _takes_context(fn: Callable[..., Any]) -> bool:
-    """Whether *fn* accepts a third positional argument (the session context)."""
-    try:
-        params = inspect.signature(fn).parameters.values()
-    except (TypeError, ValueError):
-        return False
-    positional = 0
-    for p in params:
-        if p.kind is inspect.Parameter.VAR_POSITIONAL:
-            return True
-        if p.kind in (
-            inspect.Parameter.POSITIONAL_ONLY,
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-        ):
-            positional += 1
-    return positional >= 3
-
-
-def _finish_translation(
-    key: str, raw: str, default: str | None, params: dict[str, Any] | None
-) -> str:
-    if raw == key:
-        return default if default is not None else key
-    if not params:
-        return raw
-    try:
-        return raw.format_map(params)
-    except (KeyError, IndexError, ValueError):
-        # A translation with a broken placeholder is still better than none.
-        return raw
-
-
-class _SummaryAnswers(dict):
-    """Answers for ``str.format_map`` that keep unknown placeholders intact."""
-
-    def __missing__(self, key: str) -> str:
-        return "{" + key + "}"
-
-    def __getitem__(self, key: str) -> Any:
-        value = super().__getitem__(key) if key in self else self.__missing__(key)
-        if isinstance(value, list):
-            return ", ".join(str(v) for v in value)
-        return "—" if value is None else value
-
 
 # ── Engine ────────────────────────────────────────────────────────────────────
 
@@ -164,10 +103,10 @@ class DialogEngine:
         self.steps = list(steps)
         self._by_id: dict[str, int] = {s.id: i for i, s in enumerate(steps)}
         self.text_resolver: TextResolver | AsyncTextResolver = (
-            text_resolver or _passthrough_resolver
+            text_resolver or passthrough_resolver
         )
         self._is_async_resolver = inspect.iscoroutinefunction(self.text_resolver)
-        self._resolver_takes_context = _takes_context(self.text_resolver)
+        self._resolvertakes_context = takes_context(self.text_resolver)
 
     # ── Constructors ──────────────────────────────────────────────────────────
 
@@ -484,7 +423,7 @@ class DialogEngine:
                 "Async text resolver requires calling async_resolve_text() instead"
             )
         text = cast(str, self.text_resolver(*self._resolver_args(step.text, session)))
-        return self._fill_summary(step, text, session)
+        return fill_summary(step, text, session)
 
     async def async_resolve_text(
         self,
@@ -501,7 +440,7 @@ class DialogEngine:
             Awaitable[str],
             self.text_resolver(*self._resolver_args(step.text, session)),
         )
-        return self._fill_summary(step, text, session)
+        return fill_summary(step, text, session)
 
     def translate(
         self,
@@ -526,7 +465,7 @@ class DialogEngine:
             raw = cast(str, self.text_resolver(*self._resolver_args(key, session)))
         except LookupError:
             raw = key
-        return _finish_translation(key, raw, default, params)
+        return finish_translation(key, raw, default, params)
 
     async def async_translate(
         self,
@@ -545,7 +484,7 @@ class DialogEngine:
             )
         except LookupError:
             raw = key
-        return _finish_translation(key, raw, default, params)
+        return finish_translation(key, raw, default, params)
 
     def resolve_error(
         self, exc: ValidationError, session: DialogSession | None = None
@@ -610,23 +549,6 @@ class DialogEngine:
         if self.ttl is not None:
             session.expires_at = self._clock() + self.ttl
 
-    @staticmethod
-    def _fill_summary(
-        step: DialogStep, text: str, session: DialogSession | None
-    ) -> str:
-        """Fill ``{step_id}`` placeholders of a ``confirm`` step with answers.
-
-        Unknown placeholders are left as they are, so a stray brace in the
-        text never breaks the summary.
-        """
-        if step.type != "confirm" or session is None:
-            return text
-        answers = _SummaryAnswers(session.answers)
-        try:
-            return text.format_map(answers)
-        except (IndexError, ValueError, AttributeError):
-            return text
-
     def _store_and_advance(
         self, session: DialogSession, step: DialogStep, value: Any
     ) -> DialogStep | None:
@@ -682,7 +604,7 @@ class DialogEngine:
         self, key: str, session: DialogSession | None
     ) -> tuple[Any, ...]:
         answers = session.answers if session is not None else {}
-        if not self._resolver_takes_context:
+        if not self._resolvertakes_context:
             return key, answers
         context = session.context if session is not None else {}
         return key, answers, context
